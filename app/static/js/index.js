@@ -5,8 +5,10 @@
 (function () {
   // UI elements
   const logEl = document.getElementById('log');
-  const video = document.getElementById('video');
+  const video = document.getElementById('video');         // foreground (clear)
+  const bgVideo = document.getElementById('bg-video');   // background (blurred via CSS)
   const canvas = document.getElementById('canvas');
+  const startBtn = document.getElementById('start-button');
   const voiceBtn = document.getElementById('voice-btn');
   const voiceStatus = document.getElementById('voice-status');
 
@@ -16,6 +18,9 @@
   let readyWS = false;
   let readyCam = false;
   let awaitingResponse = false;
+
+  // running state controlled by big button
+  let running = false;
 
   // helpers
   function log(...args) {
@@ -101,8 +106,10 @@
       ws.onclose = (ev) => {
         readyWS = false;
         log('[WS] closed', ev && ev.code ? ev.code : '');
-        // reconnect after a short delay
-        setTimeout(() => { initFlow().catch(e => log('reconnect init error', e)); }, 1000);
+        // reconnect after a short delay, but only if still running
+        if (running) {
+          setTimeout(() => { initFlow().catch(e => log('reconnect init error', e)); }, 1000);
+        }
       };
 
       ws.onerror = (e) => {
@@ -127,7 +134,16 @@
       }
       // Prefer modern API
       if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        const constraints = { video: { width: 640, height: 480, facingMode: 'environment' }, audio: false };
+        // Prefer portrait (vertical phone). Use ideal hints; browser may adapt.
+        const constraints = {
+          video: {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 720 },
+            height: { ideal: 1280 },
+            // Do not request audio here for camera; voice uses separate request when needed.
+          },
+          audio: false
+        };
         const s = await navigator.mediaDevices.getUserMedia(constraints);
         streamRef = s;
       } else {
@@ -138,9 +154,26 @@
           getUserMedia.call(navigator, { video: true, audio: false }, resolve, reject);
         });
       }
+      // assign stream to both foreground and background videos
       if (!video) throw new Error('no-video-element');
-      video.srcObject = streamRef;
-      await video.play();
+      try {
+        video.srcObject = streamRef;
+        // Some browsers require explicit play()
+        await video.play().catch(() => {});
+      } catch (e) {
+        log('[CAM] play foreground error', e);
+      }
+
+      if (bgVideo) {
+        try {
+          // Use the same stream for background
+          bgVideo.srcObject = streamRef;
+          await bgVideo.play().catch(() => {});
+        } catch (e) {
+          log('[CAM] play background error', e);
+        }
+      }
+
       readyCam = true;
       log('[CAM] ready');
     } catch (e) {
@@ -174,6 +207,10 @@
         try { video.pause(); } catch (_) { }
         try { video.srcObject = null; } catch (_) { }
       }
+      if (bgVideo) {
+        try { bgVideo.pause(); } catch (_) { }
+        try { bgVideo.srcObject = null; } catch (_) { }
+      }
       readyCam = false;
       log('[CAM] stopped');
     }
@@ -182,8 +219,24 @@
   // capture frame => ArrayBuffer
   function captureToArrayBuffer() {
     if (!canvas || !video) return Promise.resolve(null);
+    // adjust canvas size to video dimensions if available
+    try {
+      const w = video.videoWidth || canvas.width || 640;
+      const h = video.videoHeight || canvas.height || 480;
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+      }
+    } catch (e) {
+      // ignore
+    }
     const ctx = canvas.getContext('2d');
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    try {
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    } catch (e) {
+      log('[CAPTURE] drawImage failed', e);
+      return Promise.resolve(null);
+    }
     return new Promise((resolve) => {
       canvas.toBlob((blob) => {
         if (!blob) return resolve(null);
@@ -194,6 +247,10 @@
 
   // sending logic
   async function sendOneIfReady() {
+    if (!running) {
+      log('[SEND] not running, skipping');
+      return;
+    }
     if (!readyCam || !readyWS) {
       log('[SEND] not ready: readyCam=', readyCam, 'readyWS=', readyWS);
       return;
@@ -231,12 +288,12 @@
   async function initFlow() {
     log('[INIT] starting initFlow');
     try {
-      const tasks = [
-        createAndAwaitWS().catch(e => { log('[INIT] WS init failed:', e); }),
-        startCamera().catch(e => { log('[INIT] Cam init failed:', e); throw e; })
-      ];
-      // if camera fails, we want to fail init
-      await Promise.allSettled(tasks);
+      // create ws and camera in parallel, but we want to fail if camera fails
+      const wsTask = createAndAwaitWS().catch(e => { log('[INIT] WS init failed:', e); });
+      const camTask = startCamera().catch(e => { log('[INIT] Cam init failed:', e); throw e; });
+
+      await Promise.allSettled([wsTask, camTask]);
+
       if (!readyCam) {
         log('[INIT] Camera not ready — stopping initFlow');
         return;
@@ -361,6 +418,7 @@
 
     // Camera stop/start
     if (text.includes('стоп камера') || text.includes('останови камеру') || text.includes('выключи камеру')) {
+      // stop camera but keep app running
       stopCamera();
       speakTTS('Камера остановлена');
       return;
@@ -371,7 +429,8 @@
     }
 
     if (text === 'стоп') {
-      stopCamera();
+      // stop entire app
+      stopAll();
       speakTTS('Остановлено');
       return;
     }
@@ -435,24 +494,78 @@
     }
   }
 
+  // Start/Stop app
+  async function startAll() {
+    if (running) {
+      log('[APP] already running');
+      return;
+    }
+    running = true;
+    updateStartUI();
+    try {
+      await initFlow();
+    } catch (e) {
+      log('[APP] startAll error', e);
+    }
+  }
+
+  function stopAll() {
+    if (!running) return;
+    running = false;
+    updateStartUI();
+    try {
+      // cancel TTS and recognition
+      try { window.speechSynthesis.cancel(); } catch(_) {}
+      try { if (recognition && recognizing) recognition.stop(); } catch (_) {}
+      // close ws
+      try { if (ws) ws.close(); } catch (_) {}
+      ws = null;
+      readyWS = false;
+      // stop camera
+      stopCamera();
+      awaitingResponse = false;
+      log('[APP] stopped');
+    } catch (e) {
+      log('[APP] stopAll error', e);
+    }
+  }
+
+  function updateStartUI() {
+    if (!startBtn) return;
+    if (running) {
+      startBtn.textContent = 'СТОП';
+      startBtn.setAttribute('aria-pressed', 'true');
+    } else {
+      startBtn.textContent = 'НАЧАТЬ';
+      startBtn.setAttribute('aria-pressed', 'false');
+    }
+  }
+
   // Wire UI
+  if (startBtn) {
+    startBtn.addEventListener('click', () => {
+      if (running) {
+        stopAll();
+      } else {
+        startAll();
+      }
+    });
+    updateStartUI();
+  }
+
   if (voiceBtn) {
     voiceBtn.addEventListener('click', () => {
       toggleRecognition().catch(e => log('[VOICE] toggle error', e));
     });
     updateVoiceUI();
-  } else {
-    // no voice UI; still prepare recognition lazily
-    // no-op
   }
 
-  // Start on load
+  // Start on load? we don't auto start because UI has big start button.
   window.addEventListener('load', () => {
-    // If opened inside an in-app browser, warn user
     if (isInAppBrowser()) {
       log('[ENV] Похоже, вы используете встроенный браузер приложения. Если камера/микрофон не работают, откройте страницу в Chrome/Safari.');
     }
-    initFlow().catch(e => log('[INIT] top error', e));
+    // do not call initFlow here; wait for user to press НАЧАТЬ
   });
 
   window.addEventListener('beforeunload', () => {
@@ -462,11 +575,13 @@
 
   // Expose some functions for debugging in console (optional)
   window.__app_client = {
+    startAll,
+    stopAll,
     startCamera,
     stopCamera,
     enableTorch,
     toggleRecognition,
-    getState: () => ({ readyCam, readyWS, awaitingResponse, streamRefExists: !!streamRef })
+    getState: () => ({ running, readyCam, readyWS, awaitingResponse, streamRefExists: !!streamRef, torchOn })
   };
 
 })();
