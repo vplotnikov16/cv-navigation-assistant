@@ -3,6 +3,8 @@ import json
 import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from app import register_frame
+
 router = APIRouter()
 
 
@@ -14,13 +16,17 @@ async def ws_endpoint(ws: WebSocket):
     try:
         while True:
             data = await ws.receive_bytes()  # ждём байты JPEG
+            try:
+                register_frame()
+            except Exception:
+                pass
             preview = data[:20]
             logging.info(
                 "Received image from %s: total %d bytes; first20(hex)=%s; first20(list)=%s",
                 client, len(data), preview.hex(), list(preview)
             )
             # заглушка инференса
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.4)
             text = "проверка аудио"
             logging.info("Отправляю ответ пользователю...")
             payload = {"ok": True, "bytes": len(data), "text": text}

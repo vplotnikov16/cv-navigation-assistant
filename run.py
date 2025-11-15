@@ -6,7 +6,7 @@ from project_settings import get_project_python
 python_in_venv = str(get_project_python())
 host = '0.0.0.0'
 port = '8000'
-args = [python_in_venv, '-m', 'uvicorn', 'server:app', '--host', '0.0.0.0', '--reload']
+args = [python_in_venv, '-m', 'uvicorn', 'server:app', '--host', host, '--port', port, '--reload']
 
 # Запускаем подпроцесс, унаследовав stdin/stdout/stderr
 try:
