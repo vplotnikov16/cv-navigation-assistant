@@ -1,0 +1,38 @@
+/* базовые стили для всех страниц */
+:root {
+  --page-padding: 12px;
+  --muted-color: #666;
+  --bg-log: #fafafa;
+  --border: #eee;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  background: #fff;
+  color: #111;
+}
+
+main {
+  padding: var(--page-padding);
+}
+
+.muted {
+  color: var(--muted-color);
+  font-size: 13px;
+}
+
+/* общий контейнер лога (можно переопределить на странице) */
+#log {
+  white-space: pre-wrap;
+  background: var(--bg-log);
+  border: 1px solid var(--border);
+  padding: 10px;
+  height: 240px;
+  overflow: auto;
+  font-family: monospace;
+  font-size: 13px;
+  margin-top: 8px;
+}

@@ -8,7 +8,7 @@ def get_project_root() -> Path:
 
 def get_requirements_path(dev: bool = False) -> Path:
     requirements_filename = 'requirements-dev.txt' if dev else 'requirements.txt'
-    return get_project_root() / 'max_venv' / requirements_filename
+    return get_project_root() / 'cvna_venv' / requirements_filename
 
 
 def get_project_venv_path() -> Path:

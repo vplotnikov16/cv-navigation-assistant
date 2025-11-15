@@ -67,7 +67,6 @@ def install_missing_requirements(python_executable: Path, requirements_file: Pat
         lib_name = re.split(r'[<>=!]', line)[0].strip().lower()
         requirements.append((lib_name, line))
 
-    # Устанавливаем пакеты — НЕ перенаправляем вывод: пользователь увидит прогресс pip
     for lib_name, full_spec in requirements:
         if lib_name in installed_packages:
             continue

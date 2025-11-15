@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block title %}Auto camera → WebSocket demo{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', path='css/index.css') }}">
+{% endblock %}
+
+{% block content %}
+<h3>Авто: камера → сервер (инференс-заглушка 0.5s) → TTS → следующий кадр</h3>
+
+<video id="video" width="640" height="480" autoplay playsinline muted></video>
+<canvas id="canvas" width="640" height="480" style="display:none"></canvas>
+
+<div class="muted">Страница автоматически запрашивает камеру и подключается к WebSocket. Разрешите доступ к камере.</div>
+
+<h4>Лог (клиента):</h4>
+<div id="log"></div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', path='js/index.js') }}" defer></script>
+{% endblock %}

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>{% block title %}My App{% endblock %}</title>
+
+    <!-- общие стили -->
+    <link rel="stylesheet" href="{{ url_for('static', path='css/base.css') }}">
+
+    <!-- дополнительные стили страницы -->
+    {% block extra_css %}
+    {% endblock %}
+</head>
+<body>
+<main>
+    {% block content %}{% endblock %}
+</main>
+
+<!-- общая логика/скрипты можно подключать тут, page-specific — в блоке -->
+<script>
+    // Небольшая полезная функция — лог в консоль (опционально)
+    window.__appName = "{{ request.scope.get('path','/') }}";
+</script>
+
+{% block extra_js %}
+{% endblock %}
+</body>
+</html>

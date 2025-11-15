@@ -1,7 +1,7 @@
 import sys
 import subprocess
 
-from max_venv.setup_venv import is_running_from_project_venv, setup_venv, install_missing_requirements
+from cvna_venv.setup_venv import is_running_from_project_venv, setup_venv, install_missing_requirements
 from project_settings import get_project_venv_path, get_requirements_path, get_project_python, get_project_root
 
 
