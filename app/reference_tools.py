@@ -12,90 +12,104 @@ from project_settings import get_project_root
 _model: ultralytics.YOLO | None = None
 
 
-def get_translated_class_name(class_name: str) -> str:
-    classes = {
-        'person': 'человек',
-        'bicycle': 'велосипед',
-        'car': 'машина',
-        'motorcycle': 'мотоцикл',
-        'airplane': 'самолёт',
-        'bus': 'автобус',
-        'train': 'поезд',
-        'truck': 'грузовик',
-        'boat': 'лодка',
-        'traffic light': 'светофор',
-        'fire hydrant': 'пожарный гидрант',
-        'stop sign': 'знак стоп',
-        'parking meter': 'паркомат',
-        'bench': 'скамейка',
-        'bird': 'птица',
-        'cat': 'кот',
-        'dog': 'собака',
-        'horse': 'лошадь',
-        'sheep': 'овца',
-        'cow': 'корова',
-        'elephant': 'слон',
-        'bear': 'медведь',
-        'zebra': 'зебра',
-        'giraffe': 'жираф',
-        'backpack': 'рюкзак',
-        'umbrella': 'зонт',
-        'handbag': 'сумка',
-        'tie': 'галстук',
-        'suitcase': 'чемодан',
-        'frisbee': 'фрисби',
-        'skis': 'лыжи',
-        'snowboard': 'сноуборд',
-        'sports ball': 'мяч',
-        'kite': 'воздушный змей',
-        'baseball bat': 'бейсбольная бита',
-        'baseball glove': 'бейсбольная перчатка',
-        'skateboard': 'скейтборд',
-        'surfboard': 'серфборд',
-        'tennis racket': 'теннисная ракетка',
-        'bottle': 'бутылка',
-        'wine glass': 'бокал',
-        'cup': 'чашка',
-        'fork': 'вилка',
-        'knife': 'нож',
-        'spoon': 'ложка',
-        'bowl': 'миска',
-        'banana': 'банан',
-        'apple': 'яблоко',
-        'sandwich': 'сэндвич',
-        'orange': 'апельсин',
-        'broccoli': 'брокколи',
-        'carrot': 'морковь',
-        'hot dog': 'хот-дог',
-        'pizza': 'пицца',
-        'donut': 'пончик',
-        'cake': 'торт',
-        'chair': 'стул',
-        'couch': 'диван',
-        'potted plant': 'растение в горшке',
-        'bed': 'кровать',
-        'dining table': 'обеденный стол',
-        'toilet': 'унитаз',
-        'tv': 'телевизор',
-        'laptop': 'ноутбук',
-        'mouse': 'мышь',
-        'remote': 'пульт',
-        'keyboard': 'клавиатура',
-        'cell phone': 'телефон',
-        'microwave': 'микроволновка',
-        'oven': 'духовка',
-        'toaster': 'тостер',
-        'sink': 'раковина',
-        'refrigerator': 'холодильник',
-        'book': 'книга',
-        'clock': 'часы',
-        'vase': 'ваза',
-        'scissors': 'ножницы',
-        'teddy bear': 'плюшевый медведь',
-        'hair drier': 'фен',
-        'toothbrush': 'зубная щетка'
-    }
-    return classes.get(class_name, class_name)
+CLASS_INFO: Dict[int, Tuple[str, str, Tuple[float, float]]] = {
+    0:  ("person", "человек", (0.5, 1.7)),
+    1:  ("bicycle", "велосипед", (0.6, 1.1)),
+    2:  ("car", "машина", (1.8, 1.5)),
+    3:  ("motorcycle", "мотоцикл", (0.8, 1.2)),
+    4:  ("airplane", "самолёт", (10.0, 3.0)),
+    5:  ("bus", "автобус", (2.5, 3.0)),
+    6:  ("train", "поезд", (3.0, 4.0)),
+    7:  ("truck", "грузовик", (2.5, 3.5)),
+    8:  ("boat", "лодка", (4.0, 1.5)),
+    9:  ("traffic light", "светофор", (0.3, 0.8)),
+    10: ("fire hydrant", "пожарный гидрант", (0.4, 0.8)),
+    11: ("stop sign", "знак стоп", (0.6, 0.6)),
+    12: ("parking meter", "паркомат", (0.2, 1.0)),
+    13: ("bench", "скамейка", (1.5, 0.9)),
+    14: ("bird", "птица", (0.15, 0.25)),
+    15: ("cat", "кот", (0.2, 0.3)),
+    16: ("dog", "собака", (0.3, 0.5)),
+    17: ("horse", "лошадь", (1.5, 2.0)),
+    18: ("sheep", "овца", (0.6, 1.0)),
+    19: ("cow", "корова", (1.2, 1.5)),
+    20: ("elephant", "слон", (2.5, 3.0)),
+    21: ("bear", "медведь", (1.0, 1.8)),
+    22: ("zebra", "зебра", (1.2, 1.5)),
+    23: ("giraffe", "жираф", (1.0, 5.0)),
+    24: ("backpack", "рюкзак", (0.3, 0.4)),
+    25: ("umbrella", "зонт", (0.8, 1.2)),
+    26: ("handbag", "сумка", (0.3, 0.2)),
+    27: ("tie", "галстук", (0.1, 0.4)),
+    28: ("suitcase", "чемодан", (0.5, 0.3)),
+    29: ("frisbee", "фрисби", (0.25, 0.25)),
+    30: ("skis", "лыжи", (0.1, 1.8)),
+    31: ("snowboard", "сноуборд", (0.3, 1.5)),
+    32: ("sports ball", "мяч", (0.22, 0.22)),
+    33: ("kite", "воздушный змей", (0.8, 0.8)),
+    34: ("baseball bat", "бейсбольная бита", (0.07, 1.0)),
+    35: ("baseball glove", "бейсбольная перчатка", (0.3, 0.3)),
+    36: ("skateboard", "скейтборд", (0.2, 0.08)),
+    37: ("surfboard", "серфборд", (0.6, 0.2)),
+    38: ("tennis racket", "теннисная ракетка", (0.3, 0.7)),
+    39: ("bottle", "бутылка", (0.08, 0.25)),
+    40: ("wine glass", "бокал", (0.08, 0.15)),
+    41: ("cup", "чашка", (0.08, 0.1)),
+    42: ("fork", "вилка", (0.02, 0.15)),
+    43: ("knife", "нож", (0.02, 0.2)),
+    44: ("spoon", "ложка", (0.02, 0.15)),
+    45: ("bowl", "миска", (0.15, 0.08)),
+    46: ("banana", "банан", (0.03, 0.2)),
+    47: ("apple", "яблоко", (0.08, 0.08)),
+    48: ("sandwich", "сэндвич", (0.15, 0.08)),
+    49: ("orange", "апельсин", (0.08, 0.08)),
+    50: ("broccoli", "брокколи", (0.15, 0.2)),
+    51: ("carrot", "морковь", (0.05, 0.2)),
+    52: ("hot dog", "хот-дог", (0.02, 0.15)),
+    53: ("pizza", "пицца", (0.3, 0.3)),
+    54: ("donut", "пончик", (0.1, 0.1)),
+    55: ("cake", "торт", (0.2, 0.1)),
+    56: ("chair", "стул", (0.5, 0.8)),
+    57: ("couch", "диван", (1.8, 0.9)),
+    58: ("potted plant", "растение в горшке", (0.4, 0.6)),
+    59: ("bed", "кровать", (2.0, 0.5)),
+    60: ("dining table", "обеденный стол", (1.5, 0.8)),
+    61: ("toilet", "унитаз", (0.4, 0.7)),
+    62: ("tv", "телевизор", (1.0, 0.6)),
+    63: ("laptop", "ноутбук", (0.3, 0.2)),
+    64: ("mouse", "мышь", (0.1, 0.05)),
+    65: ("remote", "пульт", (0.15, 0.03)),
+    66: ("keyboard", "клавиатура", (0.4, 0.15)),
+    67: ("cell phone", "телефон", (0.07, 0.15)),
+    68: ("microwave", "микроволновка", (0.5, 0.4)),
+    69: ("oven", "духовка", (0.6, 0.6)),
+    70: ("toaster", "тостер", (0.3, 0.2)),
+    71: ("sink", "раковина", (0.6, 0.4)),
+    72: ("refrigerator", "холодильник", (0.8, 1.8)),
+    73: ("book", "книга", (0.2, 0.3)),
+    74: ("clock", "часы", (0.15, 0.15)),
+    75: ("vase", "ваза", (0.2, 0.25)),
+    76: ("scissors", "ножницы", (0.15, 0.05)),
+    77: ("teddy bear", "плюшевый медведь", (0.3, 0.4)),
+    78: ("hair drier", "фен", (0.2, 0.2)),
+    79: ("toothbrush", "зубная щетка", (0.02, 0.2)),
+}
+
+
+def get_class_info(class_id: int) -> Tuple[str, str, Tuple[float, float]]:
+    return CLASS_INFO.get(class_id, ("unknown", "неизвестно", (1.0, 1.0)))
+
+
+def get_en_class_name(class_id: int) -> str:
+    return get_class_info(class_id)[0]
+
+
+def get_ru_class_name(class_id: int) -> str:
+    return get_class_info(class_id)[1]
+
+
+def get_class_ref_size(class_id: int) -> Tuple[float, float]:
+    return get_class_info(class_id)[2]
 
 
 class DistanceCategory(str, Enum):
@@ -135,28 +149,13 @@ def inference(image_bytes: bytes) -> ultralytics.engine.results.Results:
     return detections
 
 
-def get_class_names() -> Dict[int, str]:
-    return get_model().names
-
-
-def get_class_name(class_id: int) -> str:
-    return get_class_names()[class_id]
-
-
-def get_reference_size(class_name: str) -> Tuple[float, float]:
-    sizes = {
-
-    }
-    return sizes.get(class_name, (1.0, 1.0))
-
-
 def get_focal_length() -> float:
     return 1000.0
 
 
-def estimate_distance(class_name: str, bbox_height: float, image_height: int) -> float:
-    if class_name in get_class_names().values():
-        _, known_height = get_reference_size(class_name)
+def estimate_distance(class_id: int, bbox_height: float, image_height: int) -> float:
+    if class_id in CLASS_INFO.keys():
+        _, known_height = get_class_ref_size(class_id)
         distance = (known_height * get_focal_length()) / bbox_height
         return float(distance)
 
@@ -208,19 +207,18 @@ def serialize_detections(detections: Any, image_shape: Tuple[int, int]) -> List[
 
     for box, cls_id, conf in zip(detections.boxes.xyxy, detections.boxes.cls, detections.boxes.conf):
         class_id = int(cls_id)
-        class_name = get_class_name(class_id)
         confidence = float(conf)
 
         x1, y1, x2, y2 = map(float, box.cpu().numpy())
         bbox_height = y2 - y1
-        distance_m = estimate_distance(class_name, bbox_height, image_height)
+        distance_m = estimate_distance(class_id, bbox_height, image_height)
         distance_cat, distance_str = get_distance_category(distance_m)
 
         box_center = ((x1 + x2) / 2, (y1 + y2) / 2)
         horizontal, vertical = calculate_direction(box_center, image_center)
 
         results.append({
-            "object": get_translated_class_name(class_name),
+            "object": get_ru_class_name(class_id),
             "class_id": class_id,
             "confidence": confidence,
             "distance": {

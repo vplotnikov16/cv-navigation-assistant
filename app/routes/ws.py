@@ -29,10 +29,28 @@ def format_distance_for_tts(meters: float) -> str:
     if meters < 0.01:
         return 'менее одного сантиметра'
 
-    if meters < 1.0:
+    if meters < 0.8:
         cms = int(round(meters * 100))
         form = _ru_plural_form(cms, ('сантиметр', 'сантиметра', 'сантиметров'))
         return f"{cms} {form}"
+
+    if 0.8 <= meters < 1.25:
+        return "около метра"
+
+    if 1.25 <= meters < 1.75:
+        return "около полутора метров"
+
+    if 1.75 <= meters < 2.25:
+        return 'около двух метров'
+
+    if 2.25 <= meters < 2.75:
+        return 'около двух с половиной метров'
+
+    if 2.75 <= meters < 3.25:
+        return 'около трёх метров'
+
+    if 3.25 <= meters < 3.75:
+        return 'около трёх с половиной метров'
 
     rounded = round(meters, 1)
     int_part = int(rounded)
