@@ -72,41 +72,46 @@
       };
 
       ws.onmessage = (ev) => {
-        try {
-          const txt = typeof ev.data === 'string' ? ev.data : null;
-          if (txt) {
-            const msg = JSON.parse(txt);
-            log('[WS] got response:', JSON.stringify(msg));
-            awaitingResponse = false;
-            if (msg && msg.text) {
-              try {
-                window.speechSynthesis.cancel();
-                const u = new SpeechSynthesisUtterance(msg.text);
-                u.lang = 'ru-RU';
-                u.onend = () => {
-                  log('[TTS] finished');
-                  scheduleNextCapture();
-                };
-                window.speechSynthesis.speak(u);
-                log('[TTS] speaking:', msg.text);
-              } catch (e) {
-                log('[TTS] error:', e);
-                scheduleNextCapture();
+          try {
+            const txt = typeof ev.data === 'string' ? ev.data : null;
+            if (txt) {
+              const msg = JSON.parse(txt);
+              log('[WS] got response:', JSON.stringify(msg));
+
+              // Разрешаем отправку следующего кадра сразу — не ждём окончания TTS.
+              awaitingResponse = false;
+
+              // Сразу планируем следующий захват/отправку (независимо от TTS).
+              scheduleNextCapture();
+
+              if (msg && msg.text) {
+                try {
+                  // Воспроизводим TTS параллельно — не блокируем цикл отправки.
+                  window.speechSynthesis.cancel();
+                  const u = new SpeechSynthesisUtterance(msg.text);
+                  u.lang = 'ru-RU';
+                  u.onend = () => {
+                    log('[TTS] finished');
+                    // Не нужно снова вызывать scheduleNextCapture здесь — мы уже запланировали.
+                  };
+                  window.speechSynthesis.speak(u);
+                  log('[TTS] speaking:', msg.text);
+                } catch (e) {
+                  log('[TTS] error:', e);
+                  // Если TTS упал, цикл уже запланирован выше, ничего дополнительно делать не нужно.
+                }
               }
             } else {
+              log('[WS] received non-text message');
+              awaitingResponse = false;
               scheduleNextCapture();
             }
-          } else {
-            log('[WS] received non-text message');
+          } catch (e) {
+            log('[WS] onmessage parse error', e);
             awaitingResponse = false;
             scheduleNextCapture();
           }
-        } catch (e) {
-          log('[WS] onmessage parse error', e);
-          awaitingResponse = false;
-          scheduleNextCapture();
-        }
-      };
+        };
 
       ws.onclose = (ev) => {
         readyWS = false;
