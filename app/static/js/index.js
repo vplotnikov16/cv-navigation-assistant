@@ -22,6 +22,11 @@
   // running state controlled by big button
   let running = false;
 
+  // Voice state
+  let recognition = null;
+  let recognizing = false;
+  let torchOn = false;
+
   // helpers
   function log(...args) {
     try {
@@ -139,8 +144,7 @@
           video: {
             facingMode: { ideal: 'environment' },
             width: { ideal: 720 },
-            height: { ideal: 1280 },
-            // Do not request audio here for camera; voice uses separate request when needed.
+            height: { ideal: 1280 }
           },
           audio: false
         };
@@ -158,7 +162,6 @@
       if (!video) throw new Error('no-video-element');
       try {
         video.srcObject = streamRef;
-        // Some browsers require explicit play()
         await video.play().catch(() => {});
       } catch (e) {
         log('[CAM] play foreground error', e);
@@ -166,7 +169,6 @@
 
       if (bgVideo) {
         try {
-          // Use the same stream for background
           bgVideo.srcObject = streamRef;
           await bgVideo.play().catch(() => {});
         } catch (e) {
@@ -308,10 +310,7 @@
     }
   }
 
-  // Voice recognition (SpeechRecognition) + torch control
-  let recognition = null;
-  let recognizing = false;
-  let torchOn = false;
+  // Voice recognition (SpeechRecognition) + helpers
 
   function createRecognition() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition || null;
@@ -320,7 +319,8 @@
     const r = new SpeechRecognition();
     r.lang = 'ru-RU';
     r.interimResults = false;
-    r.continuous = false;
+    // enable continuous listening so user can say commands anytime
+    r.continuous = true;
     r.maxAlternatives = 1;
 
     r.onstart = () => {
@@ -332,15 +332,27 @@
       recognizing = false;
       updateVoiceUI();
       log('[VOICE] recognition ended');
+      // Auto-restart recognition if app still running to keep listening
+      if (running) {
+        // small delay to avoid tight restart loop on persistent errors
+        setTimeout(() => {
+          try {
+            r.start();
+          } catch (e) {
+            log('[VOICE] restart after end failed', e);
+          }
+        }, 300);
+      }
     };
     r.onerror = (ev) => {
       recognizing = false;
       updateVoiceUI();
       log('[VOICE] recognition error', ev && ev.error ? ev.error : ev);
+      // on certain errors, recognition may stop; let onend handle restart if needed
     };
     r.onresult = (ev) => {
       try {
-        const txt = ev.results[0][0].transcript;
+        const txt = ev.results[ev.results.length - 1][0].transcript;
         log('[VOICE] got:', txt);
         handleVoiceCommand(txt);
       } catch (e) {
@@ -357,42 +369,74 @@
   }
 
   async function ensureMicrophonePermission() {
-    // Some browsers (esp. Safari) may require an explicit getUserMedia audio request
+    // Some browsers (esp. Safari) require an explicit getUserMedia audio request
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
       try {
+        // request audio-only permission (we don't need to keep this audio stream)
         await navigator.mediaDevices.getUserMedia({ audio: true });
+        log('[VOICE] microphone permission granted');
         return true;
       } catch (e) {
         log('[VOICE] cannot get audio permission:', e && e.name ? e.name : e);
         return false;
       }
     }
+    // If API not present, then cannot request; return false but still try recognition if implemented
     return false;
+  }
+
+  async function startRecognition() {
+    // ensure we have permission first where needed
+    const micOk = await ensureMicrophonePermission().catch(() => false);
+    recognition = createRecognition();
+    if (!recognition) {
+      log('[VOICE] SpeechRecognition API not supported in this browser');
+      if (voiceStatus) voiceStatus.textContent = 'SpeechRecognition не поддерживается';
+      return;
+    }
+    if (!micOk) {
+      // It's possible recognition still works (browser handles permission internally), but warn
+      log('[VOICE] микрофон не подтверждён; распознавание может не работать полноценно');
+    }
+    try {
+      recognition.start();
+    } catch (e) {
+      log('[VOICE] recognition.start failed', e);
+      // try to request mic explicitly and start again
+      const ok = await ensureMicrophonePermission().catch(() => false);
+      if (ok) {
+        try { recognition.start(); } catch (e2) { log('[VOICE] recognition.start after permission failed', e2); }
+      }
+    }
+  }
+
+  async function stopRecognition() {
+    try {
+      if (recognition) {
+        try {
+          recognition.stop();
+        } catch (_) { }
+        // allow onend to run then drop reference
+        recognition = null;
+      }
+    } catch (e) {
+      log('[VOICE] stopRecognition error', e);
+    } finally {
+      recognizing = false;
+      updateVoiceUI();
+    }
   }
 
   async function toggleRecognition() {
     if (!recognition) {
-      recognition = createRecognition();
-      if (!recognition) {
-        // try to request mic first (Safari may require) and rebuild recognition
-        const micOk = await ensureMicrophonePermission().catch(() => false);
-        recognition = createRecognition();
-        if (!recognition) {
-          log('[VOICE] SpeechRecognition API not supported in this browser');
-          if (voiceStatus) voiceStatus.textContent = 'SpeechRecognition не поддерживается';
-          return;
-        } else if (!micOk) {
-          log('[VOICE] Микрофон не доступен/разрешение не получено — распознавание может не работать');
-        }
-      }
+      await startRecognition();
+      return;
     }
-
     if (recognizing) {
       try { recognition.stop(); } catch (_) { }
     } else {
       try { recognition.start(); } catch (e) {
         log('[VOICE] recognition.start error', e);
-        // try requesting mic then restart
         const ok = await ensureMicrophonePermission().catch(() => false);
         if (ok) {
           try { recognition.start(); } catch (e2) { log('[VOICE] start after permission failed', e2); }
@@ -504,6 +548,8 @@
     updateStartUI();
     try {
       await initFlow();
+      // start listening for voice commands as soon as we started camera/ws
+      await startRecognition();
     } catch (e) {
       log('[APP] startAll error', e);
     }
@@ -523,6 +569,8 @@
       readyWS = false;
       // stop camera
       stopCamera();
+      // stop recognition fully
+      stopRecognition().catch(() => {});
       awaitingResponse = false;
       log('[APP] stopped');
     } catch (e) {
@@ -581,7 +629,7 @@
     stopCamera,
     enableTorch,
     toggleRecognition,
-    getState: () => ({ running, readyCam, readyWS, awaitingResponse, streamRefExists: !!streamRef, torchOn })
+    getState: () => ({ running, readyCam, readyWS, awaitingResponse, streamRefExists: !!streamRef, torchOn, recognizing })
   };
 
 })();
