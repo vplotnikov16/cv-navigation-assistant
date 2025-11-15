@@ -1,17 +1,47 @@
-// Перенесённый JS — оставлен почти без изменений.
-// Файл подключается с defer — DOM уже будет готов.
+// app/static/js/index.js
+// Универсальный клиент JS: камера, WebSocket, TTS, голосовые команды (robust для Chromium/Safari/desktop/mobile).
+// Подключается с `defer` — DOM уже готов.
 
-(function(){
+(function () {
+  // UI elements
   const logEl = document.getElementById('log');
-  function log(...args){ logEl.textContent += args.join(' ') + '\n'; logEl.scrollTop = logEl.scrollHeight; console.log(...args); }
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+  const voiceBtn = document.getElementById('voice-btn');
+  const voiceStatus = document.getElementById('voice-status');
 
+  // state
   let ws = null;
-  let video = document.getElementById('video');
-  let canvas = document.getElementById('canvas');
   let streamRef = null;
   let readyWS = false;
   let readyCam = false;
   let awaitingResponse = false;
+
+  // helpers
+  function log(...args) {
+    try {
+      if (logEl) {
+        logEl.textContent += args.join(' ') + '\n';
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+    } catch (e) { /* ignore UI errors */ }
+    console.log(...args);
+  }
+
+  function isSecureContextOrLocalhost() {
+    return window.isSecureContext || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+  }
+
+  function isInAppBrowser() {
+    const ua = navigator.userAgent || '';
+    if (window.ReactNativeWebView) return true;
+    return /FBAV|FBAN|Instagram|Twitter|LinkedIn|Line|Puffin|UCBrowser|MicroMessenger|QQ\//i.test(ua);
+  }
+
+  // WebSocket
+  function wsProtocol() {
+    return location.protocol === 'https:' ? 'wss:' : 'ws:';
+  }
 
   function createAndAwaitWS() {
     return new Promise((resolve, reject) => {
@@ -20,20 +50,23 @@
         resolve();
         return;
       }
-      // используем тот же host, что и страница
-      ws = new WebSocket("ws://" + location.host + "/ws");
-      ws.binaryType = "arraybuffer";
+
+      const url = `${wsProtocol()}//${location.host}/ws`;
+      ws = new WebSocket(url);
+      ws.binaryType = 'arraybuffer';
+
       ws.onopen = () => {
         readyWS = true;
-        log("[WS] connected");
+        log('[WS] connected', url);
         resolve();
       };
+
       ws.onmessage = (ev) => {
         try {
           const txt = typeof ev.data === 'string' ? ev.data : null;
           if (txt) {
             const msg = JSON.parse(txt);
-            log("[WS] got response:", JSON.stringify(msg));
+            log('[WS] got response:', JSON.stringify(msg));
             awaitingResponse = false;
             if (msg && msg.text) {
               try {
@@ -41,233 +74,114 @@
                 const u = new SpeechSynthesisUtterance(msg.text);
                 u.lang = 'ru-RU';
                 u.onend = () => {
-                  log("[TTS] finished");
+                  log('[TTS] finished');
                   scheduleNextCapture();
                 };
                 window.speechSynthesis.speak(u);
-                log("[TTS] speaking:", msg.text);
+                log('[TTS] speaking:', msg.text);
               } catch (e) {
-                log("[TTS] error:", e);
+                log('[TTS] error:', e);
                 scheduleNextCapture();
               }
             } else {
               scheduleNextCapture();
             }
           } else {
-            log("[WS] received non-text message");
+            log('[WS] received non-text message');
             awaitingResponse = false;
             scheduleNextCapture();
           }
         } catch (e) {
-          log("[WS] onmessage parse error", e);
+          log('[WS] onmessage parse error', e);
           awaitingResponse = false;
           scheduleNextCapture();
         }
       };
+
       ws.onclose = (ev) => {
         readyWS = false;
-        log("[WS] closed", ev && ev.code ? ev.code : "");
-        setTimeout(() => { initFlow().catch(e=>log("reconnect init error", e)); }, 1000);
+        log('[WS] closed', ev && ev.code ? ev.code : '');
+        // reconnect after a short delay
+        setTimeout(() => { initFlow().catch(e => log('reconnect init error', e)); }, 1000);
       };
+
       ws.onerror = (e) => {
-        log("[WS] error", e && e.message ? e.message : e);
+        log('[WS] error', e && e.message ? e.message : e);
       };
+
+      // safety timeout
       setTimeout(() => {
-        if (!readyWS) {
-          reject(new Error("WS connect timeout"));
-        }
+        if (!readyWS) reject(new Error('WS connect timeout'));
       }, 5000);
     });
   }
 
+  // Camera
   async function startCamera() {
     try {
-      const s = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: "environment" }, audio: false });
-      streamRef = s;
-      video.srcObject = s;
+      log('[CAM] starting camera: secure?', isSecureContextOrLocalhost(), 'in-app?', isInAppBrowser());
+      if (!isSecureContextOrLocalhost()) {
+        const msg = 'Страница не в безопасном контексте (HTTPS или localhost required) — камера может не работать.';
+        log('[CAM] ' + msg);
+        throw new Error('insecure-context');
+      }
+      // Prefer modern API
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        const constraints = { video: { width: 640, height: 480, facingMode: 'environment' }, audio: false };
+        const s = await navigator.mediaDevices.getUserMedia(constraints);
+        streamRef = s;
+      } else {
+        // legacy fallback
+        const getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia;
+        if (!getUserMedia) throw new Error('no-getusermedia');
+        streamRef = await new Promise((resolve, reject) => {
+          getUserMedia.call(navigator, { video: true, audio: false }, resolve, reject);
+        });
+      }
+      if (!video) throw new Error('no-video-element');
+      video.srcObject = streamRef;
       await video.play();
       readyCam = true;
-      log("Камера готова");
+      log('[CAM] ready');
     } catch (e) {
       readyCam = false;
-      log("Ошибка доступа к камере:", e && e.message ? e.message : e);
+      // user-friendly messages
+      if (e && e.name === 'NotAllowedError') {
+        log('[CAM] Доступ к камере запрещён (NotAllowedError). Проверьте разрешения сайта в браузере.');
+      } else if (e && e.name === 'NotFoundError') {
+        log('[CAM] Камера не найдена (NotFoundError).');
+      } else if (e && e.message === 'insecure-context') {
+        log('[CAM] Ошибка: требуется HTTPS или локальный хост (localhost).');
+      } else if (e && e.message === 'no-getusermedia') {
+        log('[CAM] getUserMedia не поддерживается в этом браузере/контексте.');
+      } else {
+        log('[CAM] Ошибка доступа к камере:', e && (e.message || e.name) ? (e.message || e.name) : e);
+      }
       throw e;
     }
   }
 
   function stopCamera() {
-    if (streamRef) {
-      streamRef.getTracks().forEach(t => t.stop());
-      streamRef = null;
-      video.pause();
-      video.srcObject = null;
-      readyCam = false;
-      log("Камера остановлена");
-    }
-  }
-
-  const voiceBtn = document.getElementById('voice-btn');
-const voiceStatus = document.getElementById('voice-status');
-
-let recognition = null;
-let recognizing = false;
-let torchOn = false;
-
-// Создаём и настраиваем SpeechRecognition
-function createRecognition() {
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) return null;
-
-  const r = new SpeechRecognition();
-  r.lang = 'ru-RU';
-  r.interimResults = false;
-  r.continuous = false; // короткие команды
-  r.maxAlternatives = 1;
-
-  r.onstart = () => {
-    recognizing = true;
-    updateVoiceUI();
-    log('[VOICE] recognition started');
-  };
-
-  r.onend = () => {
-    recognizing = false;
-    updateVoiceUI();
-    log('[VOICE] recognition ended');
-  };
-
-  r.onerror = (ev) => {
-    recognizing = false;
-    updateVoiceUI();
-    log('[VOICE] recognition error', ev && ev.error ? ev.error : ev);
-  };
-
-  r.onresult = (ev) => {
     try {
-      const txt = ev.results[0][0].transcript;
-      log('[VOICE] got:', txt);
-      handleVoiceCommand(txt);
-    } catch (e) {
-      log('[VOICE] parse result error', e);
-    }
-  };
-
-  return r;
-}
-
-function updateVoiceUI() {
-  if (!voiceBtn) return;
-  voiceBtn.setAttribute('aria-pressed', recognizing ? 'true' : 'false');
-  voiceStatus.textContent = recognizing ? 'Слушаю…' : 'Ожидание';
-}
-
-function toggleRecognition() {
-  if (!recognition) {
-    recognition = createRecognition();
-    if (!recognition) {
-      log('[VOICE] SpeechRecognition не поддерживается в этом браузере');
-      voiceStatus.textContent = 'SpeechRecognition не поддерживается';
-      return;
-    }
-  }
-
-  if (recognizing) {
-    try { recognition.stop(); } catch(_) {}
-  } else {
-    try { recognition.start(); } catch (e) { log('[VOICE] start error', e); }
-  }
-}
-
-// Обработка распознанной команды (простые матчи)
-function handleVoiceCommand(rawText) {
-  const text = (rawText || '').toLowerCase().trim();
-
-  // команды включения / выключения фонарика
-  if (text.includes('включи фонарик') || text.includes('включить фонарик') || text.includes('фонарик включи')) {
-    enableTorch(true);
-    return;
-  }
-  if (text.includes('выключи фонарик') || text.includes('выключить фонарик') || text.includes('фонарик выключи')) {
-    enableTorch(false);
-    return;
-  }
-
-  // стоп / старт камеры
-  if (text.includes('стоп камера') || text.includes('останови камеру') || text.includes('выключи камеру')) {
-    try { stopCamera(); log('[VOICE] camera stopped'); } catch (e) { log('[VOICE] stopCamera error', e); }
-    return;
-  }
-  if (text.includes('включить камеру') || text.includes('включи камеру') || text.includes('старт камера')) {
-    startCamera().then(() => log('[VOICE] camera started')).catch(e => log('[VOICE] startCamera error', e));
-    return;
-  }
-
-  // дополнительные: стоп (общая команда)
-  if (text === 'стоп') {
-    try { stopCamera(); log('[VOICE] camera stopped (stop)'); } catch (e) { log('[VOICE] stop error', e); }
-    return;
-  }
-
-  log('[VOICE] команда не распознана:', text);
-}
-
-// Включение/выключение фонарика (torch) — если поддерживается
-async function enableTorch(shouldEnable) {
-  try {
-    if (!streamRef) {
-      log('[TORCH] Нет активного потока камеры');
-      return;
-    }
-    // получаем видеодорожку
-    const track = streamRef.getVideoTracks()[0];
-    if (!track) { log('[TORCH] Нет видеодорожки'); return; }
-
-    const capabilities = track.getCapabilities ? track.getCapabilities() : {};
-    if (!capabilities || !('torch' in capabilities)) {
-      log('[TORCH] torch capability not supported by this device/browser');
-      return;
-    }
-
-    // применяем ограничение
-    try {
-      await track.applyConstraints({ advanced: [{ torch: !!shouldEnable }] });
-      torchOn = !!shouldEnable;
-      log('[TORCH] set', torchOn);
-    } catch (e) {
-      log('[TORCH] applyConstraints error', e);
-      // В некоторых реализациях может потребоваться ImageCapture (но оно не всегда даёт управление)
-      try {
-        if (window.ImageCapture) {
-          const ic = new ImageCapture(track);
-          if (ic && ic.track) {
-            // Конкретный API для включения torch через photo settings не стандартизован везде — пробуем setOptions если есть
-            if (typeof ic.setOptions === 'function') {
-              await ic.setOptions({ torch: !!shouldEnable });
-              torchOn = !!shouldEnable;
-              log('[TORCH] set via ImageCapture.setOptions', torchOn);
-            }
-          }
-        }
-      } catch (e2) {
-        log('[TORCH] ImageCapture fallback error', e2);
+      if (streamRef) {
+        streamRef.getTracks().forEach(t => {
+          try { t.stop(); } catch (_) { }
+        });
       }
+    } finally {
+      streamRef = null;
+      if (video) {
+        try { video.pause(); } catch (_) { }
+        try { video.srcObject = null; } catch (_) { }
+      }
+      readyCam = false;
+      log('[CAM] stopped');
     }
-  } catch (e) {
-    log('[TORCH] unexpected error', e);
   }
-}
 
-// Подключаем обработчики UI
-if (voiceBtn) {
-  voiceBtn.addEventListener('click', () => {
-    toggleRecognition();
-  });
-  updateVoiceUI();
-}
-
-// --- END voice recognition & torch control ---
-
+  // capture frame => ArrayBuffer
   function captureToArrayBuffer() {
+    if (!canvas || !video) return Promise.resolve(null);
     const ctx = canvas.getContext('2d');
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     return new Promise((resolve) => {
@@ -278,70 +192,281 @@ if (voiceBtn) {
     });
   }
 
+  // sending logic
   async function sendOneIfReady() {
     if (!readyCam || !readyWS) {
-      log("Не готовы: readyCam=", readyCam, " readyWS=", readyWS);
+      log('[SEND] not ready: readyCam=', readyCam, 'readyWS=', readyWS);
       return;
     }
     if (awaitingResponse) {
-      log("Ждём ответ сервера, не отправляем");
+      log('[SEND] waiting for server response, skipping');
       return;
     }
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-      log("WS не открыт, пробуем переподключиться");
+      log('[SEND] WS not open, reconnecting...');
       try {
         await createAndAwaitWS();
       } catch (e) {
-        log("Не удалось открыть WS:", e);
+        log('[SEND] cannot open WS:', e);
         return;
       }
     }
     try {
       const arr = await captureToArrayBuffer();
-      if (!arr) { log("Не удалось получить кадр"); return; }
-      log("Отправка кадра, bytes=", arr.byteLength);
+      if (!arr) { log('[SEND] cannot capture frame'); return; }
+      log('[SEND] sending bytes=', arr.byteLength);
       awaitingResponse = true;
       ws.send(arr);
     } catch (e) {
-      log("Ошибка отправки кадра:", e);
+      log('[SEND] send error', e);
       awaitingResponse = false;
     }
   }
 
   function scheduleNextCapture(delayMs = 50) {
-    setTimeout(() => {
-      sendOneIfReady();
-    }, delayMs);
+    setTimeout(() => sendOneIfReady(), delayMs);
   }
 
+  // init flow
   async function initFlow() {
-    log("Инициализация...");
+    log('[INIT] starting initFlow');
     try {
-      await Promise.allSettled([
-        createAndAwaitWS().catch(e => { log("WS init failed:", e); }),
-        startCamera().catch(e => { log("Cam init failed:", e); throw e; })
-      ]);
+      const tasks = [
+        createAndAwaitWS().catch(e => { log('[INIT] WS init failed:', e); }),
+        startCamera().catch(e => { log('[INIT] Cam init failed:', e); throw e; })
+      ];
+      // if camera fails, we want to fail init
+      await Promise.allSettled(tasks);
       if (!readyCam) {
-        log("Камера не готова — останов");
+        log('[INIT] Camera not ready — stopping initFlow');
         return;
       }
       if (!readyWS) {
-        log("WS не готов — но попытаемся всё равно отправлять, будет переподключение");
+        log('[INIT] WS not ready — will attempt to send when ready');
       }
-      log("Старт цикла отправки");
+      log('[INIT] starting send cycle');
       await sendOneIfReady();
     } catch (e) {
-      log("initFlow error:", e);
+      log('[INIT] initFlow error', e);
     }
   }
 
+  // Voice recognition (SpeechRecognition) + torch control
+  let recognition = null;
+  let recognizing = false;
+  let torchOn = false;
+
+  function createRecognition() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+    if (!SpeechRecognition) return null;
+
+    const r = new SpeechRecognition();
+    r.lang = 'ru-RU';
+    r.interimResults = false;
+    r.continuous = false;
+    r.maxAlternatives = 1;
+
+    r.onstart = () => {
+      recognizing = true;
+      updateVoiceUI();
+      log('[VOICE] recognition started');
+    };
+    r.onend = () => {
+      recognizing = false;
+      updateVoiceUI();
+      log('[VOICE] recognition ended');
+    };
+    r.onerror = (ev) => {
+      recognizing = false;
+      updateVoiceUI();
+      log('[VOICE] recognition error', ev && ev.error ? ev.error : ev);
+    };
+    r.onresult = (ev) => {
+      try {
+        const txt = ev.results[0][0].transcript;
+        log('[VOICE] got:', txt);
+        handleVoiceCommand(txt);
+      } catch (e) {
+        log('[VOICE] parse result error', e);
+      }
+    };
+    return r;
+  }
+
+  function updateVoiceUI() {
+    if (!voiceBtn || !voiceStatus) return;
+    voiceBtn.setAttribute('aria-pressed', recognizing ? 'true' : 'false');
+    voiceStatus.textContent = recognizing ? 'Слушаю…' : 'Ожидание';
+  }
+
+  async function ensureMicrophonePermission() {
+    // Some browsers (esp. Safari) may require an explicit getUserMedia audio request
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      try {
+        await navigator.mediaDevices.getUserMedia({ audio: true });
+        return true;
+      } catch (e) {
+        log('[VOICE] cannot get audio permission:', e && e.name ? e.name : e);
+        return false;
+      }
+    }
+    return false;
+  }
+
+  async function toggleRecognition() {
+    if (!recognition) {
+      recognition = createRecognition();
+      if (!recognition) {
+        // try to request mic first (Safari may require) and rebuild recognition
+        const micOk = await ensureMicrophonePermission().catch(() => false);
+        recognition = createRecognition();
+        if (!recognition) {
+          log('[VOICE] SpeechRecognition API not supported in this browser');
+          if (voiceStatus) voiceStatus.textContent = 'SpeechRecognition не поддерживается';
+          return;
+        } else if (!micOk) {
+          log('[VOICE] Микрофон не доступен/разрешение не получено — распознавание может не работать');
+        }
+      }
+    }
+
+    if (recognizing) {
+      try { recognition.stop(); } catch (_) { }
+    } else {
+      try { recognition.start(); } catch (e) {
+        log('[VOICE] recognition.start error', e);
+        // try requesting mic then restart
+        const ok = await ensureMicrophonePermission().catch(() => false);
+        if (ok) {
+          try { recognition.start(); } catch (e2) { log('[VOICE] start after permission failed', e2); }
+        }
+      }
+    }
+  }
+
+  function handleVoiceCommand(rawText) {
+    const text = (rawText || '').toLowerCase().trim();
+
+    // Torch
+    if (text.includes('включи фонарик') || text.includes('включить фонарик') || text.includes('фонарик включи')) {
+      enableTorch(true);
+      speakTTS('Фонарик включаю');
+      return;
+    }
+    if (text.includes('выключи фонарик') || text.includes('выключить фонарик') || text.includes('фонарик выключи')) {
+      enableTorch(false);
+      speakTTS('Фонарик выключаю');
+      return;
+    }
+
+    // Camera stop/start
+    if (text.includes('стоп камера') || text.includes('останови камеру') || text.includes('выключи камеру')) {
+      stopCamera();
+      speakTTS('Камера остановлена');
+      return;
+    }
+    if (text.includes('включить камеру') || text.includes('включи камеру') || text.includes('старт камера')) {
+      startCamera().then(() => speakTTS('Камера включена')).catch(e => { log('[VOICE] startCamera error', e); speakTTS('Не удалось включить камеру'); });
+      return;
+    }
+
+    if (text === 'стоп') {
+      stopCamera();
+      speakTTS('Остановлено');
+      return;
+    }
+
+    log('[VOICE] команда не распознана:', text);
+    speakTTS('Команда не распознана');
+  }
+
+  function speakTTS(text) {
+    try {
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = 'ru-RU';
+      window.speechSynthesis.speak(u);
+    } catch (e) {
+      log('[TTS] speak error', e);
+    }
+  }
+
+  // Torch control
+  async function enableTorch(shouldEnable) {
+    try {
+      if (!streamRef) {
+        log('[TORCH] Нет активного видеопотока');
+        return;
+      }
+      const track = streamRef.getVideoTracks()[0];
+      if (!track) { log('[TORCH] Нет видеодорожки'); return; }
+
+      const capabilities = typeof track.getCapabilities === 'function' ? track.getCapabilities() : {};
+      if (!capabilities || !('torch' in capabilities)) {
+        log('[TORCH] torch capability not supported');
+        return;
+      }
+
+      try {
+        await track.applyConstraints({ advanced: [{ torch: !!shouldEnable }] });
+        torchOn = !!shouldEnable;
+        log('[TORCH] set', torchOn);
+      } catch (e) {
+        log('[TORCH] applyConstraints error, trying ImageCapture fallback', e);
+        try {
+          if (window.ImageCapture) {
+            const ic = new ImageCapture(track);
+            if (ic && typeof ic.setOptions === 'function') {
+              await ic.setOptions({ torch: !!shouldEnable });
+              torchOn = !!shouldEnable;
+              log('[TORCH] set via ImageCapture', torchOn);
+            } else {
+              log('[TORCH] ImageCapture does not support setOptions on this platform');
+            }
+          } else {
+            log('[TORCH] ImageCapture not available');
+          }
+        } catch (e2) {
+          log('[TORCH] ImageCapture fallback error', e2);
+        }
+      }
+    } catch (e) {
+      log('[TORCH] unexpected error', e);
+    }
+  }
+
+  // Wire UI
+  if (voiceBtn) {
+    voiceBtn.addEventListener('click', () => {
+      toggleRecognition().catch(e => log('[VOICE] toggle error', e));
+    });
+    updateVoiceUI();
+  } else {
+    // no voice UI; still prepare recognition lazily
+    // no-op
+  }
+
+  // Start on load
   window.addEventListener('load', () => {
-    initFlow().catch(e => log("initFlow top error", e));
+    // If opened inside an in-app browser, warn user
+    if (isInAppBrowser()) {
+      log('[ENV] Похоже, вы используете встроенный браузер приложения. Если камера/микрофон не работают, откройте страницу в Chrome/Safari.');
+    }
+    initFlow().catch(e => log('[INIT] top error', e));
   });
 
   window.addEventListener('beforeunload', () => {
-    try { if (ws) ws.close(); } catch(_) {}
+    try { if (ws) ws.close(); } catch (_) { }
     stopCamera();
   });
+
+  // Expose some functions for debugging in console (optional)
+  window.__app_client = {
+    startCamera,
+    stopCamera,
+    enableTorch,
+    toggleRecognition,
+    getState: () => ({ readyCam, readyWS, awaitingResponse, streamRefExists: !!streamRef })
+  };
 
 })();
