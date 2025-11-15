@@ -27,6 +27,9 @@
   let recognizing = false;
   let torchOn = false;
 
+  let pendingTTS = null;        // содержит самый свежий текст, который нужно сказать после текущего
+  let currentUtterance = null;  // объект SpeechSynthesisUtterance, который сейчас говорит (или null)
+
   // helpers
   function log(...args) {
     try {
@@ -82,20 +85,16 @@
               awaitingResponse = false;
               scheduleNextCapture();
 
-              // Если текст для TTS есть и не состоит только из пробелов, ставим в очередь.
+              // Если текст для TTS есть и не состоит только из пробелов, ставим/обновляем pendingTTS.
               if (msg && typeof msg.text === 'string' && msg.text.trim().length > 0) {
-                try {
-                  const u = new SpeechSynthesisUtterance(msg.text);
-                  u.lang = 'ru-RU';
-                  u.onend = () => {
-                    log('[TTS] finished');
-                    // Не вызываем scheduleNextCapture() здесь — цикл уже запланирован выше.
-                  };
-                  // Не отменяем текущее воспроизведение — просто ставим в очередь.
-                  window.speechSynthesis.speak(u);
-                  log('[TTS] queued:', msg.text);
-                } catch (e) {
-                  log('[TTS] error:', e);
+                const newText = msg.text.trim();
+                pendingTTS = newText; // перезаписываем предыдущую очередь — берем самый свежий
+                log('[TTS] queued (latest replaces previous):', newText);
+                // Если сейчас ничего не произносится и нет активного utterance — стартуем немедленно
+                if (!speechSynthesis.speaking && !currentUtterance) {
+                  speakNextTTS();
+                } else {
+                  log('[TTS] speaking in progress, will speak queued after current');
                 }
               } else {
                 log('[TTS] empty or missing text — nothing to speak');
@@ -600,6 +599,49 @@ async function ensureWSAlive() {
     }
   }
 
+  function speakNextTTS() {
+      if (!pendingTTS) return;
+      const textToSpeak = pendingTTS;
+      pendingTTS = null; // забираем в работу — последующие сообщения перезапишут следующий pending
+      try {
+        currentUtterance = new SpeechSynthesisUtterance(textToSpeak);
+        currentUtterance.lang = 'ru-RU';
+        currentUtterance.onend = () => {
+          log('[TTS] finished:', textToSpeak);
+          currentUtterance = null;
+          // Если за время говорения накопился новый pending — говорим его
+          setTimeout(() => {
+            if (pendingTTS) {
+              speakNextTTS();
+            }
+          }, 30);
+        };
+        currentUtterance.onerror = (e) => {
+          log('[TTS] utterance error', e);
+          currentUtterance = null;
+          // попробуем следующий, если есть
+          setTimeout(() => { if (pendingTTS) speakNextTTS(); }, 30);
+        };
+        window.speechSynthesis.speak(currentUtterance);
+        log('[TTS] speaking:', textToSpeak);
+      } catch (e) {
+        log('[TTS] speak error', e);
+        currentUtterance = null;
+      }
+    }
+
+    // Старый speakTTS заменяем на enqueue-версию
+    function speakTTS(text) {
+      if (!text || typeof text !== 'string' || text.trim().length === 0) return;
+      pendingTTS = text.trim();
+      // Если ничего не говорит — начнём сразу
+      if (!speechSynthesis.speaking && !currentUtterance) {
+        speakNextTTS();
+      } else {
+        log('[TTS] enqueued (will speak after current):', pendingTTS);
+      }
+    }
+
   // Torch control
   async function enableTorch(shouldEnable) {
     try {
@@ -668,6 +710,9 @@ async function ensureWSAlive() {
     try {
       // cancel TTS and recognition
       try { window.speechSynthesis.cancel(); } catch(_) {}
+      try { window.speechSynthesis.cancel(); } catch(_) {}
+      pendingTTS = null;
+      currentUtterance = null;
       try { if (recognition && recognizing) recognition.stop(); } catch (_) {}
       // close ws
       try { if (ws) ws.close(); } catch (_) {}

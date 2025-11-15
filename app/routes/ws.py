@@ -10,6 +10,43 @@ from app.reference_tools import get_objects_from
 router = APIRouter()
 
 
+def _ru_plural_form(n: int, forms: tuple) -> str:
+    n = abs(n) % 100
+    if 11 <= n <= 14:
+        return forms[2]
+    n = n % 10
+    if n == 1:
+        return forms[0]
+    if 2 <= n <= 4:
+        return forms[1]
+    return forms[2]
+
+
+def format_distance_for_tts(meters: float) -> str:
+    if meters is None:
+        return ''
+
+    if meters < 0.01:
+        return 'менее одного сантиметра'
+
+    if meters < 1.0:
+        cms = int(round(meters * 100))
+        form = _ru_plural_form(cms, ('сантиметр', 'сантиметра', 'сантиметров'))
+        return f"{cms} {form}"
+
+    rounded = round(meters, 1)
+    int_part = int(rounded)
+    frac = int(round((rounded - int_part) * 10))
+
+    if frac == 0:
+        form = _ru_plural_form(int_part, ('метр', 'метра', 'метров'))
+        return f"{int_part} {form}"
+
+    form = _ru_plural_form(int_part, ('метр', 'метра', 'метров'))
+    text_number = f"{rounded:.1f}".replace('.', ',')
+    return f"{text_number} {form}"
+
+
 def get_closest_most_confident(detections: List[Dict]) -> Optional[Dict]:
     if not detections:
         return None
@@ -28,7 +65,8 @@ def prepare_tts_text(objects) -> str:
     horizontal = object_to_tts['direction']['horizontal']
     vertical = object_to_tts['direction']['vertical']
     obj_name = object_to_tts['object']
-    distance = object_to_tts['distance']['meters'].replace('м', ' метр')
+    est = object_to_tts.get('distance', {}).get('estimated_meters')
+    distance = format_distance_for_tts(float(est)) if est is not None else ''
     return f"{horizontal} {vertical} {obj_name} {distance}"
 
 
