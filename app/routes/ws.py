@@ -3,8 +3,6 @@ import json
 import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from app import register_frame
-
 router = APIRouter()
 
 
@@ -16,10 +14,6 @@ async def ws_endpoint(ws: WebSocket):
     try:
         while True:
             data = await ws.receive_bytes()  # ждём байты JPEG
-            try:
-                register_frame()
-            except Exception:
-                pass
             preview = data[:20]
             logging.info(
                 "Received image from %s: total %d bytes; first20(hex)=%s; first20(list)=%s",
