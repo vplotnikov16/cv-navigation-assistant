@@ -523,18 +523,29 @@ async function ensureWSAlive() {
     // Torch
     // Заменить существующую ветку "включить камеру" в handleVoiceCommand на этот код:
     if (text.includes('включить камеру') || text.includes('включи камеру') || text.includes('старт камера')) {
-      // Попробуем запустить камеру, а затем — если нужно — восстановить WS
+      // Попробуем запустить камеру, а затем — если нужно — восстановить WS и подхватить цикл отправки.
       startCamera()
         .then(async () => {
           log('[VOICE] startCamera OK via voice');
+
+          // Сбрасываем awaitingResponse на всякий случай — чтобы не застрял цикл отправки.
+          awaitingResponse = false;
+
+          // Убедиться что WS жив/восстановлен.
           try {
             await ensureWSAlive();
             log('[VOICE] WS ensured after camera start');
-            speakTTS('Камера включена');
           } catch (e) {
             log('[VOICE] Не удалось восстановить WS после старта камеры:', e);
+            // Сообщаем пользователю голосом, но всё равно попытаемся отправить кадр (WS восстановить не удалось).
             speakTTS('Камера включена, но соединение с сервером не установлено');
+            // Даже если WS отсутствует — запланируем попытку отправки, createAndAwaitWS внутри sendOneIfReady попытается восстановить.
           }
+
+          // Подтолкнём цикл отправки кадра (нежёсткая задержка чтобы дать браузеру время).
+          scheduleNextCapture(100);
+
+          speakTTS('Камера включена');
         })
         .catch(e => {
           log('[VOICE] startCamera error', e);
@@ -542,6 +553,7 @@ async function ensureWSAlive() {
         });
       return;
     }
+
 
     if (text.includes('выключи фонарик') || text.includes('выключить фонарик') || text.includes('фонарик выключи')) {
       enableTorch(false);
