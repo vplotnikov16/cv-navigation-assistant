@@ -132,6 +132,75 @@
     });
   }
 
+
+  function waitForWsClosed(timeoutMs = 2000) {
+  return new Promise((resolve) => {
+    try {
+      if (!ws || ws.readyState === WebSocket.CLOSED) {
+        resolve();
+        return;
+      }
+      // если уже OPEN, то не ждём закрытия
+      if (ws.readyState === WebSocket.OPEN) {
+        resolve();
+        return;
+      }
+      // ожидаем событие close
+      const onClose = () => {
+        try { ws.removeEventListener('close', onClose); } catch (_) {}
+        resolve();
+      };
+      try {
+        ws.addEventListener('close', onClose);
+      } catch (_) {
+        // если невозможно повесить слушатель — просто таймаут
+      }
+      // fallback таймаут
+      setTimeout(() => {
+        try { ws.removeEventListener && ws.removeEventListener('close', onClose); } catch (_) {}
+        resolve();
+      }, timeoutMs);
+    } catch (e) {
+      // на всякий случай
+      resolve();
+    }
+  });
+}
+
+async function ensureWSAlive() {
+  // уже готов
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    readyWS = true;
+    return;
+  }
+
+  // если в процессе закрытия, подождём закрытия
+  if (ws && ws.readyState === WebSocket.CLOSING) {
+    log('[WS] waiting for existing socket to close before creating new one');
+    await waitForWsClosed(2000);
+  }
+
+  // Попробуем создать WS (первый раз)
+  try {
+    await createAndAwaitWS();
+    return;
+  } catch (e) {
+    log('[WS] first create failed', e);
+    // аккуратно закрываем старый объект, если он есть
+    try { if (ws) { try { ws.close(); } catch(_){} ws = null; readyWS = false; } } catch(_) {}
+    // небольшая пауза и повтор
+    await new Promise(r => setTimeout(r, 300));
+    try {
+      await createAndAwaitWS();
+      return;
+    } catch (e2) {
+      log('[WS] second create failed', e2);
+      throw e2;
+    }
+  }
+}
+
+
   // Camera
   async function startCamera() {
     try {
@@ -458,20 +527,14 @@
       startCamera()
         .then(async () => {
           log('[VOICE] startCamera OK via voice');
-          // Если приложение в режиме running (т.е. пользователь запускал ранее через НАЧАТЬ), то WS должен быть жив;
-          // но если он закрыт — восстановим его.
-          if (!readyWS) {
-            try {
-              await createAndAwaitWS();
-              log('[VOICE] WS restored after camera start');
-            } catch (e) {
-              log('[VOICE] Не удалось восстановить WS после старта камеры:', e);
-              // Сообщаем пользователю голосом, но не мешаем камере
-              speakTTS('Камера включена, но соединение с сервером не установлено');
-              return;
-            }
+          try {
+            await ensureWSAlive();
+            log('[VOICE] WS ensured after camera start');
+            speakTTS('Камера включена');
+          } catch (e) {
+            log('[VOICE] Не удалось восстановить WS после старта камеры:', e);
+            speakTTS('Камера включена, но соединение с сервером не установлено');
           }
-          speakTTS('Камера включена');
         })
         .catch(e => {
           log('[VOICE] startCamera error', e);
@@ -479,6 +542,7 @@
         });
       return;
     }
+
     if (text.includes('выключи фонарик') || text.includes('выключить фонарик') || text.includes('фонарик выключи')) {
       enableTorch(false);
       speakTTS('Фонарик выключаю');
