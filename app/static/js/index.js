@@ -554,6 +554,12 @@ async function ensureWSAlive() {
       return;
     }
 
+    if (text.includes('включи фонарик') || text.includes('включить фонарик') || text.includes('фонарик включи')) {
+      enableTorch(true);
+      speakTTS('Фонарик включен');
+      return;
+    }
+
 
     if (text.includes('выключи фонарик') || text.includes('выключить фонарик') || text.includes('фонарик выключи')) {
       enableTorch(false);
@@ -581,7 +587,6 @@ async function ensureWSAlive() {
     }
 
     log('[VOICE] команда не распознана:', text);
-    speakTTS('Команда не распознана');
   }
 
   function speakTTS(text) {
