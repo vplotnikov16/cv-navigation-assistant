@@ -80,26 +80,25 @@
 
               // Разрешаем отправку следующего кадра сразу — не ждём окончания TTS.
               awaitingResponse = false;
-
-              // Сразу планируем следующий захват/отправку (независимо от TTS).
               scheduleNextCapture();
 
-              if (msg && msg.text) {
+              // Если текст для TTS есть и не состоит только из пробелов, ставим в очередь.
+              if (msg && typeof msg.text === 'string' && msg.text.trim().length > 0) {
                 try {
-                  // Воспроизводим TTS параллельно — не блокируем цикл отправки.
-                  window.speechSynthesis.cancel();
                   const u = new SpeechSynthesisUtterance(msg.text);
                   u.lang = 'ru-RU';
                   u.onend = () => {
                     log('[TTS] finished');
-                    // Не нужно снова вызывать scheduleNextCapture здесь — мы уже запланировали.
+                    // Не вызываем scheduleNextCapture() здесь — цикл уже запланирован выше.
                   };
+                  // Не отменяем текущее воспроизведение — просто ставим в очередь.
                   window.speechSynthesis.speak(u);
-                  log('[TTS] speaking:', msg.text);
+                  log('[TTS] queued:', msg.text);
                 } catch (e) {
                   log('[TTS] error:', e);
-                  // Если TTS упал, цикл уже запланирован выше, ничего дополнительно делать не нужно.
                 }
+              } else {
+                log('[TTS] empty or missing text — nothing to speak');
               }
             } else {
               log('[WS] received non-text message');
