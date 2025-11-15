@@ -451,11 +451,32 @@
 
   function handleVoiceCommand(rawText) {
     const text = (rawText || '').toLowerCase().trim();
-
     // Torch
-    if (text.includes('включи фонарик') || text.includes('включить фонарик') || text.includes('фонарик включи')) {
-      enableTorch(true);
-      speakTTS('Фонарик включаю');
+    // Заменить существующую ветку "включить камеру" в handleVoiceCommand на этот код:
+    if (text.includes('включить камеру') || text.includes('включи камеру') || text.includes('старт камера')) {
+      // Попробуем запустить камеру, а затем — если нужно — восстановить WS
+      startCamera()
+        .then(async () => {
+          log('[VOICE] startCamera OK via voice');
+          // Если приложение в режиме running (т.е. пользователь запускал ранее через НАЧАТЬ), то WS должен быть жив;
+          // но если он закрыт — восстановим его.
+          if (!readyWS) {
+            try {
+              await createAndAwaitWS();
+              log('[VOICE] WS restored after camera start');
+            } catch (e) {
+              log('[VOICE] Не удалось восстановить WS после старта камеры:', e);
+              // Сообщаем пользователю голосом, но не мешаем камере
+              speakTTS('Камера включена, но соединение с сервером не установлено');
+              return;
+            }
+          }
+          speakTTS('Камера включена');
+        })
+        .catch(e => {
+          log('[VOICE] startCamera error', e);
+          speakTTS('Не удалось включить камеру');
+        });
       return;
     }
     if (text.includes('выключи фонарик') || text.includes('выключить фонарик') || text.includes('фонарик выключи')) {
