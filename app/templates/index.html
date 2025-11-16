@@ -12,11 +12,6 @@
 <video id="bg-video" autoplay playsinline muted></video>
 
 <div class="camera-root app-content" role="application" aria-label="Камера приложение">
-  <div class="camera-meta">
-    <h3 style="margin:0">Авто: камера → сервер → TTS</h3>
-    <div class="muted">Для корректной работы разрешите доступ к камере</div>
-  </div>
-
   <!-- верхние 2/3 — реальное изображение камеры, центрировано -->
   <div class="camera-foreground" aria-hidden="false">
     <!-- foreground видео — это то, что сейчас использовалось как #video -->
@@ -35,9 +30,6 @@
     <button id="voice-btn" aria-pressed="false">🎤 Голос</button>
     <span id="voice-status" class="muted" style="margin-left:8px">Ожидание</span>
   </div>
-
-  <h4 style="margin-top:6px; display:none">Лог (клиента):</h4>
-  <div id="log" style="display:none"></div>
 </div>
 
 {% endblock %}
