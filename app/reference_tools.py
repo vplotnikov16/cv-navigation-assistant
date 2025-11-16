@@ -223,7 +223,7 @@ def calculate_direction(box_center: Tuple[float, float], image_center: Tuple[flo
     return horizontal, vertical
 
 
-def serialize_detections(detections: Any, image_shape: Tuple[int, int]) -> List[Dict[str, Any]]:
+def serialize_detections(detections: Any, image_shape: Tuple[int, int], model_type: Models = Models.Objects) -> List[Dict[str, Any]]:
     image_height, image_width = image_shape[:2]
     image_center = (image_width / 2, image_height / 2)
 
@@ -231,6 +231,8 @@ def serialize_detections(detections: Any, image_shape: Tuple[int, int]) -> List[
 
     for box, cls_id, conf in zip(detections.boxes.xyxy, detections.boxes.cls, detections.boxes.conf):
         class_id = int(cls_id)
+        if model_type == Models.Accessibility:
+            class_id += 80
         confidence = float(conf)
 
         x1, y1, x2, y2 = map(float, box.cpu().numpy())
@@ -282,14 +284,15 @@ def print_detections(detections_serialized: List[Dict[str, Any]]):
 def get_detections_from(image_bytes: bytes, model_type: Models = Models.Objects) -> List[Dict[str, Any]]:
     detections = inference(image_bytes, model_type)
     cv_image = bytes_to_cv2_image(image_bytes)
-    serialized = serialize_detections(detections, cv_image.shape)
+    serialized = serialize_detections(detections, cv_image.shape, model_type)
     return serialized
 
 
 if __name__ == '__main__':
-    with open(get_project_root() / 'image.jpeg', 'rb') as file:
+    with open(get_project_root() / 'img.jpg', 'rb') as file:
         image_bytes = file.read()
-    detections = inference(image_bytes)
-    cv_image = bytes_to_cv2_image(image_bytes)
-    serialized = serialize_detections(detections, cv_image.shape)
-    print(serialized[0])
+    objects = get_detections_from(image_bytes, Models.Objects)
+    accessibility = get_detections_from(image_bytes, Models.Accessibility)
+    print(get_accessibility_model().names)
+    print(objects)
+    print(accessibility)
