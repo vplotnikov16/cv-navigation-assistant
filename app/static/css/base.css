@@ -7,7 +7,7 @@
 
   /* кнопка НАЧАТЬ — контрастная для слабовидящих */
   --start-btn-bg: #FFFF00;
-  --start-btn-color: #fff;
+  --start-btn-color: #000;
   --start-btn-border: #ffffff;
 }
 
