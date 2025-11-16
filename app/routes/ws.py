@@ -88,10 +88,10 @@ def filter_objects(objects: List[Dict]) -> List[Dict]:
 
 
 def prepare_tts_text(objects) -> str:
-    if len(objects) == 0:
-        return ''
     # очевидно не None, так как выше такой случай обработан
     filtered_objects = filter_objects(objects)
+    if len(filtered_objects) == 0:
+        return ''
     object_to_tts = get_closest_most_confident(filtered_objects)
     horizontal = object_to_tts['direction']['horizontal']
     vertical = object_to_tts['direction']['vertical']
