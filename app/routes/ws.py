@@ -91,7 +91,8 @@ def prepare_tts_text(objects) -> str:
     if len(objects) == 0:
         return ''
     # очевидно не None, так как выше такой случай обработан
-    object_to_tts = get_closest_most_confident(objects)
+    filtered_objects = filter_objects(objects)
+    object_to_tts = get_closest_most_confident(filtered_objects)
     horizontal = object_to_tts['direction']['horizontal']
     vertical = object_to_tts['direction']['vertical']
     obj_name = object_to_tts['object']
