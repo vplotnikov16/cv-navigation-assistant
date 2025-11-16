@@ -9,7 +9,8 @@ import ultralytics
 from project_settings import get_project_root
 
 
-_model: ultralytics.YOLO | None = None
+_objects_model: ultralytics.YOLO | None = None
+_accessibility_model: ultralytics.YOLO | None = None
 
 
 CLASS_INFO: Dict[int, Tuple[str, str, Tuple[float, float]]] = {
@@ -93,6 +94,10 @@ CLASS_INFO: Dict[int, Tuple[str, str, Tuple[float, float]]] = {
     77: ("teddy bear", "плюшевый медведь", (0.3, 0.4)),
     78: ("hair drier", "фен", (0.2, 0.2)),
     79: ("toothbrush", "зубная щетка", (0.02, 0.2)),
+    80: ("step", "ступенька", (0.5, 0.15)),
+    81: ("stair", "лестница", (1.0, 0.8)),
+    82: ("ramp", "пандус", (1.2, 0.15)),
+    83: ("grab_bar", "поручень", (0.8, 0.05)),
 }
 
 
@@ -126,14 +131,33 @@ class Direction(str, Enum):
     BOTTOM = 'снизу'
 
 
-def get_model(path: str | Path | None = None) -> ultralytics.YOLO:
-    global _model
-    if _model is not None:
-        return _model
+class Models(str, Enum):
+    Objects = 'objects_yolo.pt'
+    Accessibility = 'accessibility_yolo.pt'
 
-    model_path = path or get_project_root() / 'app' / 'yolov8n.pt'
-    _model = ultralytics.YOLO(model_path)
-    return _model
+
+def get_objects_model(path: str | Path | None = None) -> ultralytics.YOLO:
+    global _objects_model
+    if _objects_model is not None:
+        return _objects_model
+
+    model_path = path or get_project_root() / 'app' / Models.Objects.value
+    _objects_model = ultralytics.YOLO(model_path)
+    return _objects_model
+
+
+def get_accessibility_model(path: str | Path | None = None) -> ultralytics.YOLO:
+    global _accessibility_model
+    if _accessibility_model is not None:
+        return _accessibility_model
+
+    model_path = path or get_project_root() / 'app' / Models.Accessibility.value
+    _accessibility_model = ultralytics.YOLO(model_path)
+    return _accessibility_model
+
+
+def get_model(model: Models = Models.Objects):
+    return get_objects_model() if model == Models.Objects else get_accessibility_model()
 
 
 def bytes_to_cv2_image(image_bytes: bytes) -> np.ndarray:
@@ -142,8 +166,8 @@ def bytes_to_cv2_image(image_bytes: bytes) -> np.ndarray:
     return img
 
 
-def inference(image_bytes: bytes) -> ultralytics.engine.results.Results:
-    model = get_model()
+def inference(image_bytes: bytes, model_type: Models = Models.Objects) -> ultralytics.engine.results.Results:
+    model = get_model(model_type)
     cv2_image = bytes_to_cv2_image(image_bytes)
     detections = model.predict(cv2_image, verbose=False)[0]
     return detections
@@ -255,8 +279,8 @@ def print_detections(detections_serialized: List[Dict[str, Any]]):
         print(f"{obj} | conf: {conf:.2f} | distance: {dist} ({category}) | direction: {dir_h} {dir_v} | position: ({pos_x:.1f}, {pos_y:.1f})")
 
 
-def get_objects_from(image_bytes: bytes) -> List[Dict[str, Any]]:
-    detections = inference(image_bytes)
+def get_detections_from(image_bytes: bytes, model_type: Models = Models.Objects) -> List[Dict[str, Any]]:
+    detections = inference(image_bytes, model_type)
     cv_image = bytes_to_cv2_image(image_bytes)
     serialized = serialize_detections(detections, cv_image.shape)
     return serialized

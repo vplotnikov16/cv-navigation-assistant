@@ -5,7 +5,7 @@ from typing import List, Dict, Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from app.reference_tools import get_objects_from
+from app.reference_tools import get_detections_from, Models
 
 router = APIRouter()
 
@@ -81,7 +81,8 @@ def filter_objects(objects: List[Dict]) -> List[Dict]:
         'светофор', 'пожарный гидрант', 'знак стоп', 'паркомат', 'скамейка', 'кот', 'собака',
         'лошадь', 'овца', 'корова', 'слон', 'медведь', 'зебра', 'жираф', 'рюкзак', 'зонт',
         'сумка', 'чемодан', 'лыжи', 'сноуборд', 'скейтборд', 'серфборд', 'растение в горшке',
-        'кровать', 'стол', 'унитаз', 'раковина', 'холодильник', 'стул', 'диван'
+        'кровать', 'стол', 'унитаз', 'раковина', 'холодильник', 'стул', 'диван',
+        'ступенька', 'лестница', 'пандус', 'поручень'
     ]
     return [obj for obj in objects if obj['object'] in necessary_classes]
 
@@ -109,8 +110,10 @@ async def ws_endpoint(ws: WebSocket):
         while True:
             data = await ws.receive_bytes()  # ждём байты JPEG
             logging.info("Получено изображение от %s: всего %d байт",client, len(data))
-            objects = get_objects_from(data)
-            text = prepare_tts_text(objects)
+            objects = get_detections_from(data, Models.Objects)
+            accessibility = get_detections_from(data, Models.Accessibility)
+            all_detections = objects + accessibility
+            text = prepare_tts_text(all_detections)
             logging.info("Отправляю ответ пользователю: %s", text)
             payload = {"ok": True, "bytes": len(data), "text": text}
             await ws.send_text(json.dumps(payload, ensure_ascii=False))
