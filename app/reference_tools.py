@@ -169,7 +169,7 @@ def bytes_to_cv2_image(image_bytes: bytes) -> np.ndarray:
 def inference(image_bytes: bytes, model_type: Models = Models.Objects) -> ultralytics.engine.results.Results:
     model = get_model(model_type)
     cv2_image = bytes_to_cv2_image(image_bytes)
-    detections = model.predict(cv2_image, verbose=False)[0]
+    detections = model.predict(cv2_image, verbose=False, conf=0.65)[0]
     return detections
 
 
