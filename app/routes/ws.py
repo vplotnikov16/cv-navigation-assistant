@@ -75,6 +75,18 @@ def get_closest_most_confident(detections: List[Dict]) -> Optional[Dict]:
     )
 
 
+def filter_objects(objects: List[Dict]) -> List[Dict]:
+    necessary_classes = [
+        'человек', 'велосипед', 'машина', 'мотоцикл', 'автобус', 'поезд', 'грузовик', 'лодка',
+        'светофор', 'пожарный гидрант', 'знак стоп', 'паркомат', 'скамейка', 'кот', 'собака',
+        'лошадь', 'овца', 'корова', 'слон', 'медведь', 'зебра', 'жираф', 'рюкзак', 'зонт',
+        'сумка', 'чемодан', 'лыжи', 'сноуборд', 'скейтборд', 'серфборд', 'растение в горшке',
+        'кровать', 'стол', 'унитаз', 'телевизор', 'раковина', 'духовка', 'микроволновка', 'тостер',
+        'холодильник',
+    ]
+    return [obj for obj in objects if obj['object'] in necessary_classes]
+
+
 def prepare_tts_text(objects) -> str:
     if len(objects) == 0:
         return ''
