@@ -1,16 +1,19 @@
 /* базовые стили для всех страниц */
 :root {
+  --page-padding: 12px;
   --muted-color: #666;
   --bg-log: #fafafa;
   --border: #eee;
 
-  /* Контрастная кнопка для доступности - максимальный контраст для слабовидящих */
-  --start-btn-bg: #FFFF00;
-  --start-btn-color: #000000;
-  --start-btn-border: #000000;
+  /* кнопка НАЧАТЬ — контрастная для слабовидящих */
+  --start-btn-bg: #000;
+  --start-btn-color: #fff;
+  --start-btn-border: #ffffff;
 }
 
 html, body {
+  margin: 0;
+  padding: 0;
   height: 100%;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
   background: #fff;
@@ -18,6 +21,7 @@ html, body {
 }
 
 main {
+  padding: var(--page-padding);
 }
 
 /* небольшая утилита для центровки */
@@ -37,10 +41,12 @@ main {
   white-space: pre-wrap;
   background: var(--bg-log);
   border: 1px solid var(--border);
+  padding: 10px;
   height: 240px;
   overflow: auto;
   font-family: monospace;
   font-size: 13px;
+  margin-top: 8px;
 }
 
 /* ensure main content area doesn't scroll under fixed bg */
