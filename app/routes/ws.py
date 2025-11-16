@@ -5,7 +5,7 @@ from typing import List, Dict, Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from app.reference_tools import get_detections_from, Models
+from app.reference_tools import get_detections_from, Models, Direction
 
 router = APIRouter()
 
@@ -98,6 +98,8 @@ def prepare_tts_text(objects) -> str:
     obj_name = object_to_tts['object']
     est = object_to_tts.get('distance', {}).get('estimated_meters')
     distance = format_distance_for_tts(float(est)) if est is not None else ''
+    if vertical == Direction.BOTTOM.value:
+        return f"{horizontal} {vertical} {obj_name} {distance}"
     return f"{horizontal} {obj_name} {distance}"
 
 
