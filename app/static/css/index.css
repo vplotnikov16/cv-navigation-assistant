@@ -1,4 +1,6 @@
-/* фон: размытое видео во весь экран */
+/* Liquid Glass Design для главной страницы */
+
+/* Фон: размытое видео с улучшенными эффектами - СВЕТЛЕЕ для контраста */
 #bg-video {
   position: fixed;
   top: 0;
@@ -6,14 +8,26 @@
   width: 100vw;
   height: 100vh;
   object-fit: cover;
-  filter: blur(14px) brightness(0.9) saturate(0.9);
-  transform: scale(1.03);
+  filter: blur(40px) brightness(0.85) saturate(1.2) contrast(1.1);
+  transform: scale(1.1);
   z-index: 0;
+  pointer-events: none;
+  opacity: 0.95;
+}
+
+/* Дополнительный градиентный оверлей для глубины - СВЕТЛЕЕ */
+#bg-video::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: radial-gradient(ellipse at center, transparent 0%, rgba(26, 26, 26, 0.3) 100%);
   pointer-events: none;
 }
 
-/* корневой контейнер — ноль внутренних отступов, никаких gap'ов,
-   чтобы видеопоток и кнопка ровно делили экран по вертикали */
+/* корневой контейнер */
 .camera-root {
   position: relative;
   z-index: 1;
@@ -25,30 +39,54 @@
   gap: 0;
 }
 
-/* Верхняя часть — реальное фото камеры — ровно 2/3 высоты экрана */
+/* Верхние 2/3 экрана - видеопоток */
 .camera-foreground {
   height: calc(100vh * 2 / 3);
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  padding: 20px;
+  box-sizing: border-box;
 }
 
-/* Видео (foreground) занимает максимально возможную площадь внутри контейнера */
+/* Liquid Glass стиль для видео */
 #video {
   max-height: 100%;
+  max-width: 100%;
   width: auto;
   height: auto;
   object-fit: contain;
   display: block;
-  border: 2px solid rgba(0,0,0,0.45);
   z-index: 3;
-  background: #000;
-  border-radius: 0; /* без скруглений */
-  box-shadow: none;
+  background: rgba(0, 0, 0, 0.4);
+
+  /* Liquid Glass эффект */
+  border-radius: 32px;
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.3),
+    0 0 0 1px rgba(255, 255, 255, 0.1) inset,
+    0 2px 8px rgba(255, 255, 255, 0.1) inset;
+
+  /* Плавная анимация появления */
+  animation: videoGlassAppear 0.6s ease-out;
 }
 
-/* Нижняя треть — кнопка занимая всю площадь */
+@keyframes videoGlassAppear {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Нижняя треть - контейнер кнопки */
 .camera-controls {
   height: calc(100vh * 1 / 3);
   display: flex;
@@ -56,37 +94,149 @@
   justify-content: stretch;
   padding: 0;
   box-sizing: border-box;
+  position: relative;
 }
 
-/* Кнопка НАЧАТЬ — занимает полностью контейнер нижней трети */
+/* Кнопка НАЧАТЬ - максимальный контраст для слабовидящих (WCAG AAA) */
 #start-button {
   width: 100%;
   height: 100%;
-  font-size: clamp(28px, 6vw, 48px);
+  font-size: clamp(36px, 8vw, 72px);
   font-weight: 900;
-  background: #ffde00;
-  color: #000;
-  border: 6px solid #000;
+  background: var(--start-btn-bg);
+  color: var(--start-btn-color);
+  border: 8px solid #000000;
   border-radius: 0;
-  box-shadow: none;
+  box-shadow:
+    inset 0 0 0 4px #FFFF00,
+    0 0 0 4px #000000,
+    0 8px 32px rgba(0, 0, 0, 0.8);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: 4px;
   box-sizing: border-box;
   margin: 0;
+  position: relative;
+  overflow: hidden;
+
+  /* Максимальный контраст текста - чёрный на ярко-жёлтом */
+  text-shadow: none;
+
+  transition: all 0.2s ease;
 }
 
-/* фокус доступности — сильный чёрный outline */
-#start-button:focus {
-  outline: 6px solid #000;
-  outline-offset: 0;
+/* Liquid Glass overlay поверх кнопки - приглушённый для сохранения контраста */
+#start-button::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.15) 0%,
+    rgba(255, 255, 255, 0) 50%,
+    rgba(255, 255, 255, 0.05) 100%
+  );
+  pointer-events: none;
+  opacity: 0.5;
+}
+
+/* Анимированный блик - ненавязчивый для сохранения читаемости */
+#start-button::after {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: linear-gradient(
+    45deg,
+    transparent 40%,
+    rgba(255, 255, 255, 0.25) 50%,
+    transparent 60%
+  );
+  transform: translateX(-100%) translateY(-100%) rotate(45deg);
+  transition: transform 0.6s ease;
+  pointer-events: none;
+}
+
+#start-button:hover::after {
+  transform: translateX(100%) translateY(100%) rotate(45deg);
+}
+
+#start-button:hover {
+  box-shadow:
+    inset 0 0 0 4px #FFFF00,
+    0 0 0 6px #000000,
+    0 12px 48px rgba(0, 0, 0, 0.9);
+  transform: translateY(-3px);
+  background: #FFFF00;
 }
 
 #start-button:active {
-  transform: translateY(0);
+  transform: translateY(0) scale(0.98);
+  box-shadow:
+    inset 0 0 0 4px #FFFF00,
+    0 0 0 4px #000000,
+    0 4px 16px rgba(0, 0, 0, 0.8);
+}
+
+/* Максимально видимый фокус для клавиатурной навигации */
+#start-button:focus {
+  outline: 6px solid #FFFFFF;
+  outline-offset: 4px;
+  box-shadow:
+    inset 0 0 0 4px #FFFF00,
+    0 0 0 4px #000000,
+    0 0 0 10px #FFFFFF,
+    0 0 40px rgba(255, 255, 255, 0.8);
+}
+
+#start-button:focus:not(:focus-visible) {
+  outline: none;
+  box-shadow:
+    inset 0 0 0 4px #FFFF00,
+    0 0 0 4px #000000;
+}
+
+#start-button:focus-visible {
+  outline: 6px solid #FFFFFF;
+  outline-offset: 4px;
+  box-shadow:
+    inset 0 0 0 4px #FFFF00,
+    0 0 0 4px #000000,
+    0 0 0 10px #FFFFFF,
+    0 0 40px rgba(255, 255, 255, 0.8);
+}
+
+/* Анимация пульсации - яркая и заметная для привлечения внимания */
+@keyframes pulseGlow {
+  0%, 100% {
+    box-shadow:
+      inset 0 0 0 4px #FFFF00,
+      0 0 0 4px #000000,
+      0 8px 32px rgba(0, 0, 0, 0.8);
+  }
+  50% {
+    box-shadow:
+      inset 0 0 0 4px #FFFF00,
+      0 0 0 6px #000000,
+      0 8px 48px rgba(0, 0, 0, 0.9),
+      0 0 60px rgba(255, 255, 0, 0.6);
+  }
+}
+
+#start-button {
+  animation: pulseGlow 3s ease-in-out infinite;
+}
+
+#start-button:hover {
+  animation: none;
 }
 
 /* холст остаётся скрытым */
@@ -95,17 +245,33 @@
 }
 
 /* скрываем мета-блоки */
-.camera-meta { display: none; }
+.camera-meta {
+  display: none;
+}
 
-#log { display: none; }
+#log {
+  display: none;
+}
 
-/* адаптация для очень узких экранов — высоты остаются треть/две трети экрана,
-   font-size уменьшаем чтобы текст помещался */
+/* Адаптация для мобильных устройств */
 @media (max-width: 420px) {
-  #start-button {
-    font-size: clamp(22px, 7vw, 36px);
+  .camera-foreground {
+    padding: 12px;
   }
+
   #video {
-    max-height: 100%;
+    border-radius: 24px;
+  }
+
+  #start-button {
+    font-size: clamp(28px, 8vw, 48px);
+    letter-spacing: 2px;
+  }
+}
+
+/* Дополнительные эффекты для поддерживающих браузеров */
+@supports (backdrop-filter: blur(20px)) {
+  #video {
+    background: rgba(0, 0, 0, 0.2);
   }
 }
