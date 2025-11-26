@@ -4,6 +4,8 @@ import logging
 from typing import List, Dict, Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+import numpy as np
+import cv2
 
 from app.reference_tools import get_detections_from, Models, Direction
 
@@ -106,13 +108,59 @@ async def ws_endpoint(ws: WebSocket):
     try:
         while True:
             data = await ws.receive_bytes()  # ждём байты JPEG
-            logging.info("Получено изображение от %s: всего %d байт",client, len(data))
-            objects = [] # get_detections_from(data, Models.Objects)
+            logging.info("Получено изображение от %s: всего %d байт", client, len(data))
+
+            # Получаем список детекций (серилизованные — с абсолютными координатами)
             accessibility = get_detections_from(data, Models.Accessibility)
+            # если у вас есть объекты from Objects модель — добавьте тоже
+            objects = get_detections_from(data, Models.Objects) if False else []  # включите по необходимости
             all_detections = objects + accessibility
+
+            # Подготовка TTS как раньше
             text = prepare_tts_text(all_detections)
-            logging.info("Отправляю ответ пользователю: %s", text)
-            payload = {"ok": True, "bytes": len(data), "text": text}
+
+            # Преобразуем детекции в компактный формат с нормализованными bbox
+            # Для этого восстановим cv2 image чтобы узнать размеры
+            arr = np.frombuffer(data, dtype=np.uint8)
+            img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if img is not None:
+                ih, iw = img.shape[:2]
+            else:
+                iw, ih = 640, 480  # fallback
+
+            compact = []
+            for det in all_detections:
+                bbox = det.get("bbox", {})
+                x1 = bbox.get("x1", 0)
+                y1 = bbox.get("y1", 0)
+                x2 = bbox.get("x2", 0)
+                y2 = bbox.get("y2", 0)
+                # нормализуем в 0..1 (защита на случай деления на ноль)
+                if iw > 0 and ih > 0:
+                    nx1 = float(x1) / iw
+                    ny1 = float(y1) / ih
+                    nx2 = float(x2) / iw
+                    ny2 = float(y2) / ih
+                else:
+                    nx1 = ny1 = nx2 = ny2 = 0.0
+
+                compact.append({
+                    "class": det.get("object"),
+                    "class_id": det.get("class_id"),
+                    "confidence": round(float(det.get("confidence", 0.0)), 3),
+                    "distance_m": det.get("distance", {}).get("estimated_meters"),
+                    "distance_cat": det.get("distance", {}).get("category"),
+                    "bbox_norm": [nx1, ny1, nx2, ny2]
+                })
+
+            payload = {
+                "ok": True,
+                "bytes": len(data),
+                "text": text,
+                # Отправляем и компактные детекции для клиента
+                "detections": compact
+            }
+
             await ws.send_text(json.dumps(payload, ensure_ascii=False))
     except WebSocketDisconnect:
         logging.info("WebSocket отключен: %s", client)

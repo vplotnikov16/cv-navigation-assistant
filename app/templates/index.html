@@ -18,9 +18,13 @@
   </div>
 
   <!-- верхние 2/3 — реальное изображение камеры, центрировано -->
-  <div class="camera-foreground" aria-hidden="false">
-    <!-- foreground видео — это то, что сейчас использовалось как #video -->
-    <video id="video" width="640" height="480" autoplay playsinline muted></video>
+  <div class="camera-foreground" aria-hidden="false" style="position:relative">
+    <video id="video" width="640" height="480" autoplay playsinline muted style="display:block; width:100%; height:auto;"></video>
+
+    <!-- overlay canvas поверх видео для рисования рамок -->
+    <canvas id="overlay" width="640" height="480"
+            style="position:absolute; left:0; top:0; width:100%; height:100%; pointer-events:none;"></canvas>
+
     <!-- холст для захвата кадров остаётся, скрыт -->
     <canvas id="canvas" width="640" height="480" style="display:none"></canvas>
   </div>

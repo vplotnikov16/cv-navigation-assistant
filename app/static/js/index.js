@@ -11,6 +11,8 @@
   const startBtn = document.getElementById('start-button');
   const voiceBtn = document.getElementById('voice-btn');
   const voiceStatus = document.getElementById('voice-status');
+  const overlay = document.getElementById('overlay');
+  const overlayCtx = overlay ? overlay.getContext('2d') : null;
 
   // state
   let ws = null;
@@ -80,6 +82,14 @@
             if (txt) {
               const msg = JSON.parse(txt);
               log('[WS] got response:', JSON.stringify(msg));
+
+              // если пришли dets, то перерисовываем их
+              if (msg.detections && Array.isArray(msg.detections)) {
+                drawDetectionsOnOverlay(msg.detections);
+              } else {
+                // очистить overlay если пусто
+                drawDetectionsOnOverlay([]);
+              }
 
               // Разрешаем отправку следующего кадра сразу — не ждём окончания TTS.
               awaitingResponse = false;
@@ -234,6 +244,9 @@ async function ensureWSAlive() {
       if (!video) throw new Error('no-video-element');
       try {
         video.srcObject = streamRef;
+        video.addEventListener('loadedmetadata', () => { syncOverlaySize(); });
+        window.addEventListener('resize', () => { syncOverlaySize(); });
+
         await video.play().catch(() => {});
       } catch (e) {
         log('[CAM] play foreground error', e);
@@ -720,6 +733,7 @@ async function ensureWSAlive() {
       readyWS = false;
       // stop camera
       stopCamera();
+      clearOverlay();
       // stop recognition fully
       stopRecognition().catch(() => {});
       awaitingResponse = false;
@@ -739,6 +753,105 @@ async function ensureWSAlive() {
       startBtn.setAttribute('aria-pressed', 'false');
     }
   }
+
+    function syncOverlaySize() {
+      if (!overlay || !video) return;
+      const w = video.videoWidth || video.clientWidth || 640;
+      const h = video.videoHeight || video.clientHeight || 480;
+      if (overlay.width !== w || overlay.height !== h) {
+        overlay.width = w;
+        overlay.height = h;
+      }
+      // CSS размеры под текущий элемент video (чтобы canvas покрывал видимую область)
+      overlay.style.width = (video.clientWidth || w) + "px";
+      overlay.style.height = (video.clientHeight || (overlay.style.width && (h / w) * parseFloat(overlay.style.width))) + "px";
+    }
+
+    function drawDetectionsOnOverlay(detections) {
+    if (!overlayCtx || !overlay) return;
+    syncOverlaySize();
+    const W = overlay.width;
+    const H = overlay.height;
+
+    // очистка
+    overlayCtx.clearRect(0, 0, W, H);
+
+    if (!Array.isArray(detections) || detections.length === 0) return;
+
+    overlayCtx.lineWidth = 3;
+    overlayCtx.font = '18px sans-serif';
+    overlayCtx.textBaseline = 'top';
+
+    detections.forEach(det => {
+      try {
+        const box = det.bbox_norm || det.bbox || null;
+        if (!box) return;
+        // bbox_norm: [nx1, ny1, nx2, ny2]
+        const nx1 = box[0], ny1 = box[1], nx2 = box[2], ny2 = box[3];
+        const x1 = Math.round(nx1 * W);
+        const y1 = Math.round(ny1 * H);
+        const x2 = Math.round(nx2 * W);
+        const y2 = Math.round(ny2 * H);
+        const bw = Math.max(2, x2 - x1);
+        const bh = Math.max(2, y2 - y1);
+
+        // цвет по категории расстояния (пример)
+        let color = 'lime';
+        if (det.distance_cat === 'очень близко') color = 'red';
+        else if (det.distance_cat === 'близко') color = 'orange';
+
+        // рамка
+        overlayCtx.strokeStyle = color;
+        overlayCtx.lineWidth = 3;
+        overlayCtx.strokeRect(x1, y1, bw, bh);
+
+        // подпись: класс + проценты + расстояние
+        let label = det.class || '';
+        if (typeof det.confidence === 'number') {
+          label += ' ' + Math.round(det.confidence * 100) + '%';
+        } else if (det.confidence) {
+          // если уже в 0..1 от сервера
+          const c = Number(det.confidence);
+          if (!isNaN(c)) label += ' ' + Math.round(c * 100) + '%';
+        }
+        if (det.distance_m) {
+          label += ' ' + (Number(det.distance_m).toFixed(1)) + 'm';
+        }
+
+        const padding = 6;
+        const metrics = overlayCtx.measureText(label);
+        const tw = metrics.width;
+        const th = 18; // approx
+
+        let textX = x1 + 3;
+        let textY = y1 - th - 4;
+        let bgX = x1 - padding/2;
+        let bgY = y1 - th - padding/2;
+
+        if (textY < 0) {
+          // рисуем надпись внутри рамки сверху
+          textY = y1 + 4;
+          bgY = y1 + 2;
+        }
+
+        overlayCtx.fillStyle = 'rgba(0,0,0,0.6)';
+        overlayCtx.fillRect(bgX, bgY, tw + padding, th + padding/2);
+        overlayCtx.fillStyle = 'white';
+        overlayCtx.fillText(label, textX, textY);
+      } catch (e) {
+        console.error('draw det error', e);
+      }
+    });
+  }
+
+
+  function clearOverlay() {
+      if (!overlayCtx || !overlay) return;
+      overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+    }
+
+
+
 
   // Wire UI
   if (startBtn) {

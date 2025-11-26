@@ -291,6 +291,109 @@ def get_detections_from(image_bytes: bytes, model_type: Models = Models.Objects)
     return serialized
 
 
+def draw_detections_on_image(
+    image: bytes | np.ndarray,
+    detections_serialized: List[Dict[str, Any]],
+    min_confidence: float = 0.0,
+    return_bytes: bool = True,
+) -> bytes | np.ndarray:
+    """
+    Нарисовать рамки и подписи на изображении по сериализованным детекциям.
+
+    Параметры:
+    - image: входное изображение (bytes с содержимым изображения или np.ndarray CV2).
+    - detections_serialized: список детекций в формате, как возвращает serialize_detections().
+    - min_confidence: отбрасывать детекции с confidence < min_confidence.
+    - return_bytes: если True (по умолчанию) вернёт JPEG-байты; иначе вернёт np.ndarray BGR.
+
+    Возвращает:
+    - bytes (JPEG) или np.ndarray (BGR).
+    """
+    # Получим cv2-изображение
+    if isinstance(image, (bytes, bytearray)):
+        img = bytes_to_cv2_image(bytes(image))
+    elif isinstance(image, np.ndarray):
+        img = image.copy()
+    else:
+        raise TypeError("image must be bytes or np.ndarray")
+
+    # Параметры отрисовки
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.5
+    font_thickness = 1
+    box_thickness = 2
+    padding = 4
+
+    # Цвета BGR для категорий расстояния
+    color_map = {
+        DistanceCategory.VERY_CLOSE.value: (0, 0, 255),   # красный
+        DistanceCategory.CLOSE.value:      (0, 255, 255), # жёлтый
+        DistanceCategory.FAR.value:        (0, 255, 0),   # зелёный
+    }
+    # дефолтный цвет
+    default_color = (255, 255, 255)
+
+    h_img, w_img = img.shape[:2]
+
+    for det in detections_serialized:
+        conf = float(det.get("confidence", 0.0))
+        if conf < min_confidence:
+            continue
+
+        bbox = det.get("bbox", {})
+        x1 = int(max(0, round(bbox.get("x1", 0))))
+        y1 = int(max(0, round(bbox.get("y1", 0))))
+        x2 = int(min(w_img - 1, round(bbox.get("x2", 0))))
+        y2 = int(min(h_img - 1, round(bbox.get("y2", 0))))
+
+        # выбрать цвет по категории расстояния (если есть)
+        distance_cat = det.get("distance", {}).get("category")
+        color = color_map.get(distance_cat, default_color)
+
+        # рисуем прямоугольник
+        cv2.rectangle(img, (x1, y1), (x2, y2), color, thickness=box_thickness)
+
+        # Подготовка подписи: "имя (рус) 85% — 1.20 м"
+        obj_name = det.get("object", "unknown")
+        meters = det.get("distance", {}).get("meters", "")
+        label = f"{obj_name} {int(conf * 100)}% {meters}"
+
+        # Размер текста и фон
+        (text_w, text_h), baseline = cv2.getTextSize(label, font, font_scale, font_thickness)
+        text_x = x1
+        text_y = y1 - 8  # текст над рамкой
+        # если не помещается сверху, рисуем внутри сверху рамки
+        if text_y - text_h - padding < 0:
+            text_y = y1 + text_h + padding + 2
+
+        # Координаты фона для текста
+        rect_tl = (text_x - padding, text_y - text_h - padding)
+        rect_br = (text_x + text_w + padding, text_y + baseline + padding)
+
+        # Убедимся, что координаты в пределах изображения
+        rect_tl = (max(0, rect_tl[0]), max(0, rect_tl[1]))
+        rect_br = (min(w_img - 1, rect_br[0]), min(h_img - 1, rect_br[1]))
+
+        # Полупрозрачный фон (имитация — рисуем сплошной прямоугольник)
+        cv2.rectangle(img, rect_tl, rect_br, color, thickness=-1)
+
+        # цвет текста — чёрный если фон светлый, иначе белый
+        text_color = (0, 0, 0) if (color[0] + color[1] + color[2]) > (255 * 1.5) else (255, 255, 255)
+
+        # нарисовать текст
+        cv2.putText(img, label, (text_x, text_y), font, font_scale, text_color, font_thickness, lineType=cv2.LINE_AA)
+
+    if return_bytes:
+        # кодируем в JPEG и возвращаем байты
+        success, encoded = cv2.imencode('.jpg', img)
+        if not success:
+            raise RuntimeError("Failed to encode image to JPEG")
+        return encoded.tobytes()
+    else:
+        return img
+
+
+
 if __name__ == '__main__':
     with open(get_project_root() / 'img.jpg', 'rb') as file:
         image_bytes = file.read()
