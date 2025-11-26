@@ -1,91 +1,83 @@
-/* layout для камеры + кнопка START (обновлённая версия) */
+/* ==== Fullscreen camera layout overrides ==== */
 
-/* Убрали фон #bg-video — он больше не используется */
+/* Убедиться, что html/body/main занимают всю высоту */
+html, body, main {
+  height: 100%;
+  min-height: 100%;
+  margin: 0;
+  padding: 0;
+}
 
-/* основной корневой контейнер страницы (поверх видео) */
+/* Корневой контейнер — теперь растягивается на всю высоту viewport */
 .camera-root {
   position: relative;
   z-index: 1;
-  min-height: 100vh;
+  width: 100%;
+  min-height: 100vh;   /* занимает весь viewport по высоте */
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  padding: 8px;
-  gap: 8px;
-  align-items: center;
+  padding: 0;           /* можно вернуть небольшой padding, если нужно */
+  gap: 0;
+  align-items: stretch;
+  justify-content: flex-start;
 }
 
-/* Контейнер для видео (foreground) — относительно, чтобы overlay и кнопка могли быть абсолютными */
+/* Контейнер для видео — растягиваем на всю высоту (без ограничений max-width) */
 .camera-foreground {
   position: relative;
   width: 100%;
-  max-width: 1200px;
+  height: 100vh;      /* ВАЖНО: занимает весь viewport по высоте */
+  max-width: none;    /* отменяем предыдущие ограничения по ширине */
   box-sizing: border-box;
   background: #000;
-  border-radius: 8px;
+  border-radius: 0;   /* если хотите скругления — можно вернуть */
   overflow: hidden;
-  /* видимая высота области, где располагается видео и overlay */
-  height: 60vh;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-/* Видео: занимает всю видимую область контейнера, обрезается по краям (cover) */
+/* Видео: занимает весь контейнер */
 #video {
   display: block;
   width: 100%;
   height: 100%;
-  object-fit: cover;   /* важно: видео заполняет контейнер и не оставляет полос */
+  object-fit: cover;   /* заполняет контейнер, кадр обрезается по краям */
   -o-object-fit: cover;
   background: #000;
   border: none;
   z-index: 1;
+  max-height: none;    /* на случай, если где-то ставили max-height */
 }
 
-/* overlay canvas поверх видео — точно покрывает видимую область */
+/* Overlay покрывает точно тот же экран */
 #overlay {
   position: absolute;
   left: 0;
   top: 0;
   width: 100%;
   height: 100%;
-  pointer-events: none; /* чтобы клики проходили сквозь canvas */
+  pointer-events: none;
   z-index: 5;
 }
 
-/* скрытый холст для захвата кадра остаётся невидимым */
-#canvas {
-  display: none;
-}
-
-/* мета-инфо (заголовок) — поверх видео слева сверху */
-.camera-meta {
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  z-index: 10;
-  color: #fff;
-  text-shadow: 0 2px 6px rgba(0,0,0,0.7);
-  pointer-events: none;
-}
-
-/* Кнопка НАЧАТЬ — теперь поверх видео, по центру внизу; ширина ~1/6 viewport */
+/* Кнопка — поверх видео, расположена снизу по центру */
 .camera-controls {
   position: absolute;
   left: 50%;
-  bottom: 12px;
+  bottom: 18px;
   transform: translateX(-50%);
   z-index: 12;
   display: flex;
   align-items: center;
   justify-content: center;
-  pointer-events: auto; /* кнопка должна получать клики */
+  pointer-events: auto;
 }
 
-/* Уменьшенная старт-кнопка: примерно 1/6 ширины экрана, с ограничениями */
+/* Стандартная уменьшенная кнопка */
 #start-button {
-  width: min(16.6vw, 160px); /* примерно 1/6 viewport-width, максимум 160px */
+  width: min(16.6vw, 160px);
   min-width: 84px;
   padding: 8px 12px;
   height: 44px;
@@ -97,42 +89,21 @@
   color: white;
   box-shadow: 0 8px 20px rgba(0,0,0,0.35);
   cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
 }
 
-/* фокус/hover для доступности */
-#start-button:focus {
-  outline: 3px solid rgba(255,255,255,0.9);
-  outline-offset: 3px;
-}
-
-#start-button:active {
-  transform: translateY(1px);
-}
-
-/* Лог (если откроете) — поверх, но не мешает */
-#log {
-  position: relative;
-  z-index: 10;
-}
-
-/* Адаптация для маленьких экранов (телефонов) */
-@media (max-width: 420px) {
-  .camera-foreground { height: 55vh; }
-  #start-button { width: min(20vw, 120px); font-size: 15px; height: 42px; }
-}
-
-/* Если нужно — тонкая рамка вокруг контейнера */
-.camera-foreground::after {
-  content: "";
+/* Заголовок (если нужен) поверх видео */
+.camera-meta {
   position: absolute;
-  inset: 0;
+  top: 12px;
+  left: 12px;
+  z-index: 15;
+  color: #fff;
+  text-shadow: 0 2px 6px rgba(0,0,0,0.7);
   pointer-events: none;
-  border-radius: 8px;
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.03);
-  z-index: 2;
+}
+
+/* Небольшая адаптация для телефонов */
+@media (max-width: 600px) {
+  .camera-foreground { height: 100vh; }
+  #start-button { width: min(20vw, 120px); font-size: 15px; height: 42px; }
 }
