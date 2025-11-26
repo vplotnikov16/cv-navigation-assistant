@@ -1,13 +1,13 @@
 // app/static/js/index.js
-// Универсальный клиент JS: камера, WebSocket, TTS, голосовые команды (robust для Chromium/Safari/desktop/mobile).
+// Универсальный клиент JS: камера, WebSocket, TTS, голосовые команды.
 // Подключается с `defer` — DOM уже готов.
 
 (function () {
   // UI elements
   const logEl = document.getElementById('log');
   const video = document.getElementById('video');         // foreground (clear)
-  const bgVideo = document.getElementById('bg-video');   // background (blurred via CSS)
-  const canvas = document.getElementById('canvas');
+  // const bgVideo = document.getElementById('bg-video'); // removed (not used)
+  const canvas = document.getElementById('canvas');      // hidden capture canvas
   const startBtn = document.getElementById('start-button');
   const voiceBtn = document.getElementById('voice-btn');
   const voiceStatus = document.getElementById('voice-status');
@@ -77,49 +77,49 @@
       };
 
       ws.onmessage = (ev) => {
-          try {
-            const txt = typeof ev.data === 'string' ? ev.data : null;
-            if (txt) {
-              const msg = JSON.parse(txt);
-              log('[WS] got response:', JSON.stringify(msg));
+        try {
+          const txt = typeof ev.data === 'string' ? ev.data : null;
+          if (txt) {
+            const msg = JSON.parse(txt);
+            log('[WS] got response:', JSON.stringify(msg));
 
-              // если пришли dets, то перерисовываем их
-              if (msg.detections && Array.isArray(msg.detections)) {
-                drawDetectionsOnOverlay(msg.detections);
+            // если пришли dets, то перерисовываем их
+            if (msg.detections && Array.isArray(msg.detections)) {
+              drawDetectionsOnOverlay(msg.detections);
+            } else {
+              // очистить overlay если пусто
+              drawDetectionsOnOverlay([]);
+            }
+
+            // Разрешаем отправку следующего кадра сразу — не ждём окончания TTS.
+            awaitingResponse = false;
+            scheduleNextCapture();
+
+            // Если текст для TTS есть и не состоит только из пробелов, ставим/обновляем pendingTTS.
+            if (msg && typeof msg.text === 'string' && msg.text.trim().length > 0) {
+              const newText = msg.text.trim();
+              pendingTTS = newText; // перезаписываем предыдущую очередь — берем самый свежий
+              log('[TTS] queued (latest replaces previous):', newText);
+              // Если сейчас ничего не произносится и нет активного utterance — стартуем немедленно
+              if (!speechSynthesis.speaking && !currentUtterance) {
+                speakNextTTS();
               } else {
-                // очистить overlay если пусто
-                drawDetectionsOnOverlay([]);
-              }
-
-              // Разрешаем отправку следующего кадра сразу — не ждём окончания TTS.
-              awaitingResponse = false;
-              scheduleNextCapture();
-
-              // Если текст для TTS есть и не состоит только из пробелов, ставим/обновляем pendingTTS.
-              if (msg && typeof msg.text === 'string' && msg.text.trim().length > 0) {
-                const newText = msg.text.trim();
-                pendingTTS = newText; // перезаписываем предыдущую очередь — берем самый свежий
-                log('[TTS] queued (latest replaces previous):', newText);
-                // Если сейчас ничего не произносится и нет активного utterance — стартуем немедленно
-                if (!speechSynthesis.speaking && !currentUtterance) {
-                  speakNextTTS();
-                } else {
-                  log('[TTS] speaking in progress, will speak queued after current');
-                }
-              } else {
-                log('[TTS] empty or missing text — nothing to speak');
+                log('[TTS] speaking in progress, will speak queued after current');
               }
             } else {
-              log('[WS] received non-text message');
-              awaitingResponse = false;
-              scheduleNextCapture();
+              log('[TTS] empty or missing text — nothing to speak');
             }
-          } catch (e) {
-            log('[WS] onmessage parse error', e);
+          } else {
+            log('[WS] received non-text message');
             awaitingResponse = false;
             scheduleNextCapture();
           }
-        };
+        } catch (e) {
+          log('[WS] onmessage parse error', e);
+          awaitingResponse = false;
+          scheduleNextCapture();
+        }
+      };
 
       ws.onclose = (ev) => {
         readyWS = false;
@@ -141,74 +141,72 @@
     });
   }
 
-
   function waitForWsClosed(timeoutMs = 2000) {
-  return new Promise((resolve) => {
-    try {
-      if (!ws || ws.readyState === WebSocket.CLOSED) {
-        resolve();
-        return;
-      }
-      // если уже OPEN, то не ждём закрытия
-      if (ws.readyState === WebSocket.OPEN) {
-        resolve();
-        return;
-      }
-      // ожидаем событие close
-      const onClose = () => {
-        try { ws.removeEventListener('close', onClose); } catch (_) {}
-        resolve();
-      };
+    return new Promise((resolve) => {
       try {
-        ws.addEventListener('close', onClose);
-      } catch (_) {
-        // если невозможно повесить слушатель — просто таймаут
-      }
-      // fallback таймаут
-      setTimeout(() => {
-        try { ws.removeEventListener && ws.removeEventListener('close', onClose); } catch (_) {}
+        if (!ws || ws.readyState === WebSocket.CLOSED) {
+          resolve();
+          return;
+        }
+        // если уже OPEN, то не ждём закрытия
+        if (ws.readyState === WebSocket.OPEN) {
+          resolve();
+          return;
+        }
+        // ожидаем событие close
+        const onClose = () => {
+          try { ws.removeEventListener('close', onClose); } catch (_) {}
+          resolve();
+        };
+        try {
+          ws.addEventListener('close', onClose);
+        } catch (_) {
+          // если невозможно повесить слушатель — просто таймаут
+        }
+        // fallback таймаут
+        setTimeout(() => {
+          try { ws.removeEventListener && ws.removeEventListener('close', onClose); } catch (_) {}
+          resolve();
+        }, timeoutMs);
+      } catch (e) {
+        // на всякий случай
         resolve();
-      }, timeoutMs);
-    } catch (e) {
-      // на всякий случай
-      resolve();
+      }
+    });
+  }
+
+  async function ensureWSAlive() {
+    // уже готов
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      readyWS = true;
+      return;
     }
-  });
-}
 
-async function ensureWSAlive() {
-  // уже готов
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    readyWS = true;
-    return;
-  }
+    // если в процессе закрытия, подождём закрытия
+    if (ws && ws.readyState === WebSocket.CLOSING) {
+      log('[WS] waiting for existing socket to close before creating new one');
+      await waitForWsClosed(2000);
+    }
 
-  // если в процессе закрытия, подождём закрытия
-  if (ws && ws.readyState === WebSocket.CLOSING) {
-    log('[WS] waiting for existing socket to close before creating new one');
-    await waitForWsClosed(2000);
-  }
-
-  // Попробуем создать WS (первый раз)
-  try {
-    await createAndAwaitWS();
-    return;
-  } catch (e) {
-    log('[WS] first create failed', e);
-    // аккуратно закрываем старый объект, если он есть
-    try { if (ws) { try { ws.close(); } catch(_){} ws = null; readyWS = false; } } catch(_) {}
-    // небольшая пауза и повтор
-    await new Promise(r => setTimeout(r, 300));
+    // Попробуем создать WS (первый раз)
     try {
       await createAndAwaitWS();
       return;
-    } catch (e2) {
-      log('[WS] second create failed', e2);
-      throw e2;
+    } catch (e) {
+      log('[WS] first create failed', e);
+      // аккуратно закрываем старый объект, если он есть
+      try { if (ws) { try { ws.close(); } catch(_){} ws = null; readyWS = false; } } catch(_) {}
+      // небольшая пауза и повтор
+      await new Promise(r => setTimeout(r, 300));
+      try {
+        await createAndAwaitWS();
+        return;
+      } catch (e2) {
+        log('[WS] second create failed', e2);
+        throw e2;
+      }
     }
   }
-}
-
 
   // Camera
   async function startCamera() {
@@ -240,7 +238,7 @@ async function ensureWSAlive() {
           getUserMedia.call(navigator, { video: true, audio: false }, resolve, reject);
         });
       }
-      // assign stream to both foreground and background videos
+      // assign stream to video
       if (!video) throw new Error('no-video-element');
       try {
         video.srcObject = streamRef;
@@ -250,15 +248,6 @@ async function ensureWSAlive() {
         await video.play().catch(() => {});
       } catch (e) {
         log('[CAM] play foreground error', e);
-      }
-
-      if (bgVideo) {
-        try {
-          bgVideo.srcObject = streamRef;
-          await bgVideo.play().catch(() => {});
-        } catch (e) {
-          log('[CAM] play background error', e);
-        }
       }
 
       readyCam = true;
@@ -294,10 +283,6 @@ async function ensureWSAlive() {
         try { video.pause(); } catch (_) { }
         try { video.srcObject = null; } catch (_) { }
       }
-      if (bgVideo) {
-        try { bgVideo.pause(); } catch (_) { }
-        try { bgVideo.srcObject = null; } catch (_) { }
-      }
       readyCam = false;
       log('[CAM] stopped');
     }
@@ -306,17 +291,32 @@ async function ensureWSAlive() {
   // capture frame => ArrayBuffer
   function captureToArrayBuffer() {
     if (!canvas || !video) return Promise.resolve(null);
-    // adjust canvas size to video dimensions if available
+
+    // ensure sizes are synced: hidden canvas should match video pixels
     try {
-      const w = video.videoWidth || canvas.width || 640;
-      const h = video.videoHeight || canvas.height || 480;
-      if (canvas.width !== w || canvas.height !== h) {
-        canvas.width = w;
-        canvas.height = h;
+      // prefer intrinsic video dimensions (actual pixels)
+      const vw = video.videoWidth || 0;
+      const vh = video.videoHeight || 0;
+
+      if (vw && vh) {
+        if (canvas.width !== vw || canvas.height !== vh) {
+          canvas.width = vw;
+          canvas.height = vh;
+        }
+      } else {
+        // fallback to overlay or client size
+        const rect = video.getBoundingClientRect();
+        const w = Math.max(1, Math.round(rect.width));
+        const h = Math.max(1, Math.round(rect.height));
+        if (canvas.width !== w || canvas.height !== h) {
+          canvas.width = w;
+          canvas.height = h;
+        }
       }
     } catch (e) {
-      // ignore
+      // ignore sizing errors
     }
+
     const ctx = canvas.getContext('2d');
     try {
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -533,28 +533,21 @@ async function ensureWSAlive() {
   function handleVoiceCommand(rawText) {
     const text = (rawText || '').toLowerCase().trim();
     // Torch
-    // Заменить существующую ветку "включить камеру" в handleVoiceCommand на этот код:
     if (text.includes('включить камеру') || text.includes('включи камеру') || text.includes('старт камера')) {
-      // Попробуем запустить камеру, а затем — если нужно — восстановить WS и подхватить цикл отправки.
       startCamera()
         .then(async () => {
           log('[VOICE] startCamera OK via voice');
 
-          // Сбрасываем awaitingResponse на всякий случай — чтобы не застрял цикл отправки.
           awaitingResponse = false;
 
-          // Убедиться что WS жив/восстановлен.
           try {
             await ensureWSAlive();
             log('[VOICE] WS ensured after camera start');
           } catch (e) {
             log('[VOICE] Не удалось восстановить WS после старта камеры:', e);
-            // Сообщаем пользователю голосом, но всё равно попытаемся отправить кадр (WS восстановить не удалось).
             speakTTS('Камера включена, но соединение с сервером не установлено');
-            // Даже если WS отсутствует — запланируем попытку отправки, createAndAwaitWS внутри sendOneIfReady попытается восстановить.
           }
 
-          // Подтолкнём цикл отправки кадра (нежёсткая задержка чтобы дать браузеру время).
           scheduleNextCapture(100);
 
           speakTTS('Камера включена');
@@ -572,7 +565,6 @@ async function ensureWSAlive() {
       return;
     }
 
-
     if (text.includes('выключи фонарик') || text.includes('выключить фонарик') || text.includes('фонарик выключи')) {
       enableTorch(false);
       speakTTS('Фонарик выключаю');
@@ -581,7 +573,6 @@ async function ensureWSAlive() {
 
     // Camera stop/start
     if (text.includes('стоп камера') || text.includes('останови камеру') || text.includes('выключи камеру')) {
-      // stop camera but keep app running
       stopCamera();
       speakTTS('Камера остановлена');
       return;
@@ -592,7 +583,6 @@ async function ensureWSAlive() {
     }
 
     if (text === 'стоп') {
-      // stop entire app
       stopAll();
       speakTTS('Остановлено');
       return;
@@ -601,59 +591,49 @@ async function ensureWSAlive() {
     log('[VOICE] команда не распознана:', text);
   }
 
-  function speakTTS(text) {
+  // TTS queue — enqueue version (keep only this)
+  function speakNextTTS() {
+    if (!pendingTTS) return;
+    const textToSpeak = pendingTTS;
+    pendingTTS = null; // забираем в работу — последующие сообщения перезапишут следующий pending
     try {
-      window.speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(text);
-      u.lang = 'ru-RU';
-      window.speechSynthesis.speak(u);
+      currentUtterance = new SpeechSynthesisUtterance(textToSpeak);
+      currentUtterance.lang = 'ru-RU';
+      currentUtterance.onend = () => {
+        log('[TTS] finished:', textToSpeak);
+        currentUtterance = null;
+        // Если за время говорения накопился новый pending — говорим его
+        setTimeout(() => {
+          if (pendingTTS) {
+            speakNextTTS();
+          }
+        }, 30);
+      };
+      currentUtterance.onerror = (e) => {
+        log('[TTS] utterance error', e);
+        currentUtterance = null;
+        // попробуем следующий, если есть
+        setTimeout(() => { if (pendingTTS) speakNextTTS(); }, 30);
+      };
+      window.speechSynthesis.speak(currentUtterance);
+      log('[TTS] speaking:', textToSpeak);
     } catch (e) {
       log('[TTS] speak error', e);
+      currentUtterance = null;
     }
   }
 
-  function speakNextTTS() {
-      if (!pendingTTS) return;
-      const textToSpeak = pendingTTS;
-      pendingTTS = null; // забираем в работу — последующие сообщения перезапишут следующий pending
-      try {
-        currentUtterance = new SpeechSynthesisUtterance(textToSpeak);
-        currentUtterance.lang = 'ru-RU';
-        currentUtterance.onend = () => {
-          log('[TTS] finished:', textToSpeak);
-          currentUtterance = null;
-          // Если за время говорения накопился новый pending — говорим его
-          setTimeout(() => {
-            if (pendingTTS) {
-              speakNextTTS();
-            }
-          }, 30);
-        };
-        currentUtterance.onerror = (e) => {
-          log('[TTS] utterance error', e);
-          currentUtterance = null;
-          // попробуем следующий, если есть
-          setTimeout(() => { if (pendingTTS) speakNextTTS(); }, 30);
-        };
-        window.speechSynthesis.speak(currentUtterance);
-        log('[TTS] speaking:', textToSpeak);
-      } catch (e) {
-        log('[TTS] speak error', e);
-        currentUtterance = null;
-      }
+  // Enqueue speakTTS (public)
+  function speakTTS(text) {
+    if (!text || typeof text !== 'string' || text.trim().length === 0) return;
+    pendingTTS = text.trim();
+    // Если ничего не говорит — начнём сразу
+    if (!speechSynthesis.speaking && !currentUtterance) {
+      speakNextTTS();
+    } else {
+      log('[TTS] enqueued (will speak after current):', pendingTTS);
     }
-
-    // Старый speakTTS заменяем на enqueue-версию
-    function speakTTS(text) {
-      if (!text || typeof text !== 'string' || text.trim().length === 0) return;
-      pendingTTS = text.trim();
-      // Если ничего не говорит — начнём сразу
-      if (!speechSynthesis.speaking && !currentUtterance) {
-        speakNextTTS();
-      } else {
-        log('[TTS] enqueued (will speak after current):', pendingTTS);
-      }
-    }
+  }
 
   // Torch control
   async function enableTorch(shouldEnable) {
@@ -723,7 +703,6 @@ async function ensureWSAlive() {
     try {
       // cancel TTS and recognition
       try { window.speechSynthesis.cancel(); } catch(_) {}
-      try { window.speechSynthesis.cancel(); } catch(_) {}
       pendingTTS = null;
       currentUtterance = null;
       try { if (recognition && recognizing) recognition.stop(); } catch (_) {}
@@ -733,6 +712,7 @@ async function ensureWSAlive() {
       readyWS = false;
       // stop camera
       stopCamera();
+      // clear overlay
       clearOverlay();
       // stop recognition fully
       stopRecognition().catch(() => {});
@@ -754,20 +734,38 @@ async function ensureWSAlive() {
     }
   }
 
-    function syncOverlaySize() {
-      if (!overlay || !video) return;
-      const w = video.videoWidth || video.clientWidth || 640;
-      const h = video.videoHeight || video.clientHeight || 480;
-      if (overlay.width !== w || overlay.height !== h) {
-        overlay.width = w;
-        overlay.height = h;
-      }
-      // CSS размеры под текущий элемент video (чтобы canvas покрывал видимую область)
-      overlay.style.width = (video.clientWidth || w) + "px";
-      overlay.style.height = (video.clientHeight || (overlay.style.width && (h / w) * parseFloat(overlay.style.width))) + "px";
-    }
+  // Sync overlay size so canvas covers exact visible video area and internal pixel size matches video stream
+  function syncOverlaySize() {
+    if (!overlay || !video) return;
 
-    function drawDetectionsOnOverlay(detections) {
+    // get visible rect (CSS pixels)
+    const rect = video.getBoundingClientRect();
+    const cssW = Math.max(1, Math.round(rect.width));
+    const cssH = Math.max(1, Math.round(rect.height));
+
+    // set CSS size so overlay covers same visible area
+    overlay.style.width = cssW + 'px';
+    overlay.style.height = cssH + 'px';
+
+    // set internal pixel buffer to actual video pixel size if available (better precision)
+    const vidW = video.videoWidth || 0;
+    const vidH = video.videoHeight || 0;
+
+    if (vidW && vidH) {
+      if (overlay.width !== vidW || overlay.height !== vidH) {
+        overlay.width = vidW;
+        overlay.height = vidH;
+      }
+    } else {
+      // fallback: match CSS size (approx)
+      if (overlay.width !== cssW || overlay.height !== cssH) {
+        overlay.width = cssW;
+        overlay.height = cssH;
+      }
+    }
+  }
+
+  function drawDetectionsOnOverlay(detections) {
     if (!overlayCtx || !overlay) return;
     syncOverlaySize();
     const W = overlay.width;
@@ -787,11 +785,19 @@ async function ensureWSAlive() {
         const box = det.bbox_norm || det.bbox || null;
         if (!box) return;
         // bbox_norm: [nx1, ny1, nx2, ny2]
-        const nx1 = box[0], ny1 = box[1], nx2 = box[2], ny2 = box[3];
-        const x1 = Math.round(nx1 * W);
-        const y1 = Math.round(ny1 * H);
-        const x2 = Math.round(nx2 * W);
-        const y2 = Math.round(ny2 * H);
+        const nx1 = Number(box[0]), ny1 = Number(box[1]), nx2 = Number(box[2]), ny2 = Number(box[3]);
+        if (![nx1, ny1, nx2, ny2].every(v => isFinite(v))) return;
+
+        // clamp 0..1
+        const cx1 = Math.min(1, Math.max(0, nx1));
+        const cy1 = Math.min(1, Math.max(0, ny1));
+        const cx2 = Math.min(1, Math.max(0, nx2));
+        const cy2 = Math.min(1, Math.max(0, ny2));
+
+        const x1 = Math.round(cx1 * W);
+        const y1 = Math.round(cy1 * H);
+        const x2 = Math.round(cx2 * W);
+        const y2 = Math.round(cy2 * H);
         const bw = Math.max(2, x2 - x1);
         const bh = Math.max(2, y2 - y1);
 
@@ -806,11 +812,10 @@ async function ensureWSAlive() {
         overlayCtx.strokeRect(x1, y1, bw, bh);
 
         // подпись: класс + проценты + расстояние
-        let label = det.class || '';
+        let label = det.class || det.object || '';
         if (typeof det.confidence === 'number') {
           label += ' ' + Math.round(det.confidence * 100) + '%';
         } else if (det.confidence) {
-          // если уже в 0..1 от сервера
           const c = Number(det.confidence);
           if (!isNaN(c)) label += ' ' + Math.round(c * 100) + '%';
         }
@@ -825,8 +830,8 @@ async function ensureWSAlive() {
 
         let textX = x1 + 3;
         let textY = y1 - th - 4;
-        let bgX = x1 - padding/2;
-        let bgY = y1 - th - padding/2;
+        let bgX = x1 - padding / 2;
+        let bgY = y1 - th - padding / 2;
 
         if (textY < 0) {
           // рисуем надпись внутри рамки сверху
@@ -835,7 +840,7 @@ async function ensureWSAlive() {
         }
 
         overlayCtx.fillStyle = 'rgba(0,0,0,0.6)';
-        overlayCtx.fillRect(bgX, bgY, tw + padding, th + padding/2);
+        overlayCtx.fillRect(bgX, bgY, tw + padding, th + padding / 2);
         overlayCtx.fillStyle = 'white';
         overlayCtx.fillText(label, textX, textY);
       } catch (e) {
@@ -844,14 +849,10 @@ async function ensureWSAlive() {
     });
   }
 
-
   function clearOverlay() {
-      if (!overlayCtx || !overlay) return;
-      overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
-    }
-
-
-
+    if (!overlayCtx || !overlay) return;
+    overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+  }
 
   // Wire UI
   if (startBtn) {
@@ -893,6 +894,8 @@ async function ensureWSAlive() {
     stopCamera,
     enableTorch,
     toggleRecognition,
+    clearOverlay,
+    syncOverlaySize,
     getState: () => ({ running, readyCam, readyWS, awaitingResponse, streamRefExists: !!streamRef, torchOn, recognizing })
   };
 

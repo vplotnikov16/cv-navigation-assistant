@@ -81,7 +81,7 @@ def filter_objects(objects: List[Dict]) -> List[Dict]:
     necessary_classes = [
         'ступенька', 'лестница', 'пандус', 'поручень'
     ]
-    return [obj for obj in objects if obj['object'] in necessary_classes]
+    return [obj for obj in objects if obj.get('object') in necessary_classes]
 
 
 def prepare_tts_text(objects) -> str:
@@ -90,6 +90,8 @@ def prepare_tts_text(objects) -> str:
     if len(filtered_objects) == 0:
         return ''
     object_to_tts = get_closest_most_confident(filtered_objects)
+    if not object_to_tts:
+        return ''
     horizontal = object_to_tts['direction']['horizontal']
     vertical = object_to_tts['direction']['vertical']
     obj_name = object_to_tts['object']
@@ -98,6 +100,20 @@ def prepare_tts_text(objects) -> str:
     if vertical == Direction.BOTTOM.value:
         return f"{horizontal} {vertical} {obj_name} {distance}"
     return f"{horizontal} {obj_name} {distance}"
+
+
+def _clamp01(v: float) -> float:
+    try:
+        fv = float(v)
+    except Exception:
+        return 0.0
+    if not np.isfinite(fv):
+        return 0.0
+    if fv < 0.0:
+        return 0.0
+    if fv > 1.0:
+        return 1.0
+    return fv
 
 
 @router.websocket("/ws")
@@ -111,56 +127,89 @@ async def ws_endpoint(ws: WebSocket):
             logging.info("Получено изображение от %s: всего %d байт", client, len(data))
 
             # Получаем список детекций (серилизованные — с абсолютными координатами)
+            # accessibility модель и objects модель можно комбинировать
             accessibility = get_detections_from(data, Models.Accessibility)
-            # если у вас есть объекты from Objects модель — добавьте тоже
-            objects = get_detections_from(data, Models.Objects) if False else []  # включите по необходимости
+            objects = get_detections_from(data, Models.Objects) if False else []
             all_detections = objects + accessibility
 
             # Подготовка TTS как раньше
             text = prepare_tts_text(all_detections)
 
-            # Преобразуем детекции в компактный формат с нормализованными bbox
-            # Для этого восстановим cv2 image чтобы узнать размеры
+            # Получим размеры картинки, чтобы нормализовать bbox
             arr = np.frombuffer(data, dtype=np.uint8)
             img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
             if img is not None:
-                ih, iw = img.shape[:2]
+                ih, iw = img.shape[:2]   # ih = height, iw = width
             else:
                 iw, ih = 640, 480  # fallback
 
-            compact = []
-            for det in all_detections:
-                bbox = det.get("bbox", {})
-                x1 = bbox.get("x1", 0)
-                y1 = bbox.get("y1", 0)
-                x2 = bbox.get("x2", 0)
-                y2 = bbox.get("y2", 0)
+            compact: List[Dict] = []
+
+            # сортируем детекции по confidence desc и берём top N (уменьшаем трафик)
+            top_n = 20
+            try:
+                sorted_dets = sorted(all_detections, key=lambda d: float(d.get('confidence', 0.0)), reverse=True)
+            except Exception:
+                sorted_dets = list(all_detections)
+
+            for det in sorted_dets[:top_n]:
+                # защитно извлекаем bbox и приводим к числам
+                bbox = det.get("bbox", {}) or {}
+                try:
+                    x1 = float(bbox.get("x1", 0.0))
+                    y1 = float(bbox.get("y1", 0.0))
+                    x2 = float(bbox.get("x2", 0.0))
+                    y2 = float(bbox.get("y2", 0.0))
+                except Exception:
+                    x1 = float(bbox.get("x1", 0.0)) if bbox.get("x1") else 0.0
+                    y1 = float(bbox.get("y1", 0.0)) if bbox.get("y1") else 0.0
+                    x2 = float(bbox.get("x2", 0.0)) if bbox.get("x2") else 0.0
+                    y2 = float(bbox.get("y2", 0.0)) if bbox.get("y2") else 0.0
+
                 # нормализуем в 0..1 (защита на случай деления на ноль)
                 if iw > 0 and ih > 0:
-                    nx1 = float(x1) / iw
-                    ny1 = float(y1) / ih
-                    nx2 = float(x2) / iw
-                    ny2 = float(y2) / ih
+                    nx1 = _clamp01(x1 / float(iw))
+                    ny1 = _clamp01(y1 / float(ih))
+                    nx2 = _clamp01(x2 / float(iw))
+                    ny2 = _clamp01(y2 / float(ih))
                 else:
                     nx1 = ny1 = nx2 = ny2 = 0.0
 
+                # поля, отдаваемые клиенту — конвертируем в простые типы Python
+                obj_name = det.get("object") or det.get("label") or det.get("class") or "unknown"
+                class_id = det.get("class_id")
+                try:
+                    confidence = float(det.get("confidence", 0.0))
+                except Exception:
+                    confidence = 0.0
+
+                distance_est = None
+                try:
+                    distance_est = float(det.get("distance", {}).get("estimated_meters")) if det.get("distance") else None
+                except Exception:
+                    distance_est = None
+
+                distance_cat = det.get("distance", {}).get("category") if det.get("distance") else None
+
                 compact.append({
-                    "class": det.get("object"),
-                    "class_id": det.get("class_id"),
-                    "confidence": round(float(det.get("confidence", 0.0)), 3),
-                    "distance_m": det.get("distance", {}).get("estimated_meters"),
-                    "distance_cat": det.get("distance", {}).get("category"),
-                    "bbox_norm": [nx1, ny1, nx2, ny2]
+                    "object": str(obj_name),
+                    "class": str(obj_name),           # дублируем в "class" для совместимости
+                    "class_id": int(class_id) if class_id is not None else None,
+                    "confidence": round(float(confidence), 4),
+                    "distance_m": float(distance_est) if distance_est is not None else None,
+                    "distance_cat": str(distance_cat) if distance_cat is not None else None,
+                    "bbox_norm": [float(nx1), float(ny1), float(nx2), float(ny2)]
                 })
 
             payload = {
                 "ok": True,
-                "bytes": len(data),
+                "bytes": int(len(data)),
                 "text": text,
                 # Отправляем и компактные детекции для клиента
                 "detections": compact
             }
 
+            # отправляем компактный JSON
             await ws.send_text(json.dumps(payload, ensure_ascii=False))
     except WebSocketDisconnect:
         logging.info("WebSocket отключен: %s", client)
