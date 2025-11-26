@@ -77,11 +77,6 @@ def get_closest_most_confident(detections: List[Dict]) -> Optional[Dict]:
 
 def filter_objects(objects: List[Dict]) -> List[Dict]:
     necessary_classes = [
-        'человек', 'велосипед', 'машина', 'мотоцикл', 'автобус', 'поезд', 'грузовик', 'лодка',
-        'светофор', 'пожарный гидрант', 'знак стоп', 'паркомат', 'скамейка', 'кот', 'собака',
-        'лошадь', 'овца', 'корова', 'слон', 'медведь', 'зебра', 'жираф', 'рюкзак', 'зонт',
-        'сумка', 'лыжи', 'сноуборд', 'скейтборд', 'серфборд', 'растение в горшке',
-        'кровать', 'стол', 'унитаз', 'раковина', 'стул', 'диван',
         'ступенька', 'лестница', 'пандус', 'поручень'
     ]
     return [obj for obj in objects if obj['object'] in necessary_classes]
@@ -112,7 +107,7 @@ async def ws_endpoint(ws: WebSocket):
         while True:
             data = await ws.receive_bytes()  # ждём байты JPEG
             logging.info("Получено изображение от %s: всего %d байт",client, len(data))
-            objects = get_detections_from(data, Models.Objects)
+            objects = [] # get_detections_from(data, Models.Objects)
             accessibility = get_detections_from(data, Models.Accessibility)
             all_detections = objects + accessibility
             text = prepare_tts_text(all_detections)
