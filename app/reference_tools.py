@@ -133,7 +133,7 @@ class Direction(str, Enum):
 
 class Models(str, Enum):
     Objects = 'objects_yolo.pt'
-    Accessibility = 'accessibility_yolo.pt'
+    Accessibility = 'accessibility_yolo_2.pt'
 
 
 def get_objects_model(path: str | Path | None = None) -> ultralytics.YOLO:
