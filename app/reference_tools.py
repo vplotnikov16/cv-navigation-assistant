@@ -170,7 +170,7 @@ def inference(image_bytes: bytes, model_type: Models = Models.Objects) -> ultral
     model = get_model(model_type)
     cv2_image = bytes_to_cv2_image(image_bytes)
     if model_type == Models.Accessibility:
-        detections = model.predict(cv2_image, verbose=False, conf=0.65)[0]
+        detections = model.predict(cv2_image, verbose=False)[0]
     else:
         detections = model.predict(cv2_image, verbose=False)[0]
     return detections
