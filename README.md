@@ -49,10 +49,14 @@
 - Голосовое управление камерой, фонариком и другими функциями.
 - Ансамбль моделей YOLOv8n даёт отклик за 0.1 секунды.
 - Данные обновляются в реальном времени постоянно.
+  <img width="1097" height="591" alt="image" src="https://github.com/user-attachments/assets/43067991-cbca-4c1e-aa04-f3bbf601a310" />
+
+<img width="1394" height="596" alt="image" src="https://github.com/user-attachments/assets/f93dc972-27d2-48a3-ba60-9197d8480444" />
 
 ---
 
 ## Техническая основа
+<img width="1103" height="599" alt="image" src="https://github.com/user-attachments/assets/e8361d8e-a856-462c-96b0-57d84804d8d7" />
 
 - Классификация объектов и определение расстояния выполняется на сжатых изображениях.
 - Используется ансамбль моделей YOLOv8n.
